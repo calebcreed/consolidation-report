@@ -9,6 +9,7 @@ import { FileMatcher } from './matcher';
 import { GitDiffer, ThreeWayDiffResult } from './diff';
 import { GraphBuilder, GraphAnalyzer } from './graph';
 import { ReportGenerator } from './report';
+import { Validator } from './validator';
 
 const program = new Command();
 
@@ -66,6 +67,86 @@ program
       process.exit(1);
     }
   });
+
+program
+  .command('validate')
+  .description('Validate parser results against shell find command')
+  .requiredOption('-r, --retail <path>', 'Path to retail app directory')
+  .requiredOption('-t, --restaurant <path>', 'Path to restaurant app directory')
+  .option('-e, --extensions <exts>', 'Comma-separated file extensions', '.ts,.tsx,.scss,.html')
+  .action(async (options) => {
+    try {
+      await runValidation(options);
+    } catch (err) {
+      console.error('Error:', err);
+      process.exit(1);
+    }
+  });
+
+async function runValidation(options: {
+  retail: string;
+  restaurant: string;
+  extensions: string;
+}) {
+  const retailPath = path.resolve(options.retail);
+  const restaurantPath = path.resolve(options.restaurant);
+  const extensions = options.extensions.split(',').map(e => e.trim());
+
+  console.log('Validation: Parser vs Shell Find');
+  console.log('=================================');
+  console.log(`Extensions: ${extensions.join(', ')}`);
+  console.log('');
+
+  // Parse files using the Angular parser
+  console.log('Running Angular parser...');
+  const retailParser = new AngularParser(retailPath);
+  const restaurantParser = new AngularParser(restaurantPath);
+
+  const retailFiles = retailParser.parseDirectory(retailPath, extensions);
+  const restaurantFiles = restaurantParser.parseDirectory(restaurantPath, extensions);
+
+  const retailParsedPaths = retailFiles.map(f => f.filePath);
+  const restaurantParsedPaths = restaurantFiles.map(f => f.filePath);
+
+  // Run validation
+  const validator = new Validator();
+
+  console.log('Running shell find...');
+  const retailResult = validator.validate(retailPath, retailParsedPaths, extensions);
+  const restaurantResult = validator.validate(restaurantPath, restaurantParsedPaths, extensions);
+
+  // Print reports
+  validator.printReport('Retail Validation', retailResult);
+  validator.printReport('Restaurant Validation', restaurantResult);
+
+  // Analyze patterns in missing files
+  if (retailResult.missingFiles.length > 0) {
+    console.log('\nRetail Missing File Patterns:');
+    const patterns = validator.analyzeMissingPatterns(retailResult.missingFiles, retailPath);
+    for (const [pattern, count] of Object.entries(patterns).sort((a, b) => b[1] - a[1])) {
+      console.log(`  ${pattern}: ${count}`);
+    }
+  }
+
+  if (restaurantResult.missingFiles.length > 0) {
+    console.log('\nRestaurant Missing File Patterns:');
+    const patterns = validator.analyzeMissingPatterns(restaurantResult.missingFiles, restaurantPath);
+    for (const [pattern, count] of Object.entries(patterns).sort((a, b) => b[1] - a[1])) {
+      console.log(`  ${pattern}: ${count}`);
+    }
+  }
+
+  // Summary
+  console.log('\n--- Summary ---');
+  const totalShell = retailResult.findCount + restaurantResult.findCount;
+  const totalParsed = retailResult.parserCount + restaurantResult.parserCount;
+  const totalMissing = retailResult.missingFiles.length + restaurantResult.missingFiles.length;
+
+  console.log(`Total files (shell):   ${totalShell}`);
+  console.log(`Total files (parser):  ${totalParsed}`);
+  console.log(`Total missing:         ${totalMissing}`);
+  console.log(`Coverage:              ${((totalParsed / totalShell) * 100).toFixed(1)}%`);
+}
 
 async function runAnalysis(options: {
   retail: string;
