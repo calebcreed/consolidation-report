@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { FileNode } from '../config';
 import { parseTemplate, TemplateRef } from './template';
+import { parseNgRxPatterns, NgRxPatterns, inferNgRxFileType } from './ngrx';
 
 export interface ParsedFile {
   filePath: string;
@@ -19,6 +20,8 @@ export interface ParsedFile {
   componentProviders: string[];
   constructorInjections: string[];
   templateRefs: TemplateRef[];
+  ngrx?: NgRxPatterns;         // NgRx action/reducer/effect/selector patterns
+  ngrxFileType?: 'action' | 'reducer' | 'effect' | 'selector' | 'state' | null;
 }
 
 export class AngularParser {
@@ -143,6 +146,12 @@ export class AngularParser {
       if (classes.length > 0) {
         result.className = classes[0].getName();
       }
+    }
+
+    // Parse NgRx patterns (actions, reducers, effects, selectors)
+    if (filePath.endsWith('.ts')) {
+      result.ngrx = parseNgRxPatterns(filePath, content);
+      result.ngrxFileType = inferNgRxFileType(filePath);
     }
 
     this.project.removeSourceFile(sourceFile);

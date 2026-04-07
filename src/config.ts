@@ -64,7 +64,7 @@ export interface FileNode {
 export interface DependencyEdge {
   from: string;
   to: string;
-  type: 'import' | 'ngmodule-import' | 'ngmodule-declaration' | 'provider' | 'injection' | 'template-selector' | 'template-pipe';
+  type: 'import' | 'ngmodule-import' | 'ngmodule-declaration' | 'provider' | 'injection' | 'template-selector' | 'template-pipe' | 'ngrx-action' | 'ngrx-selector';
 }
 
 export interface AnalysisResult {

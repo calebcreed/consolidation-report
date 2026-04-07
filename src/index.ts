@@ -97,8 +97,8 @@ async function runAnalysis(options: {
   const retailParser = new AngularParser(retailPath);
   const restaurantParser = new AngularParser(restaurantPath);
 
-  const retailFiles = retailParser.parseDirectory(retailPath, ['.ts']);
-  const restaurantFiles = restaurantParser.parseDirectory(restaurantPath, ['.ts']);
+  const retailFiles = retailParser.parseDirectory(retailPath, ['.ts', '.tsx', '.scss', '.html']);
+  const restaurantFiles = restaurantParser.parseDirectory(restaurantPath, ['.ts', '.tsx', '.scss', '.html']);
 
   console.log(`  Found ${retailFiles.length} retail files`);
   console.log(`  Found ${restaurantFiles.length} restaurant files`);
@@ -220,8 +220,8 @@ async function runMatching(options: {
   const retailParser = new AngularParser(retailPath);
   const restaurantParser = new AngularParser(restaurantPath);
 
-  const retailFiles = retailParser.parseDirectory(retailPath, ['.ts']);
-  const restaurantFiles = restaurantParser.parseDirectory(restaurantPath, ['.ts']);
+  const retailFiles = retailParser.parseDirectory(retailPath, ['.ts', '.tsx', '.scss', '.html']);
+  const restaurantFiles = restaurantParser.parseDirectory(restaurantPath, ['.ts', '.tsx', '.scss', '.html']);
 
   console.log('Matching files...');
   const matcher = new FileMatcher(retailPath, restaurantPath);
@@ -249,8 +249,8 @@ async function runStats(options: {
   const retailParser = new AngularParser(retailPath);
   const restaurantParser = new AngularParser(restaurantPath);
 
-  const retailFiles = retailParser.parseDirectory(retailPath, ['.ts']);
-  const restaurantFiles = restaurantParser.parseDirectory(restaurantPath, ['.ts']);
+  const retailFiles = retailParser.parseDirectory(retailPath, ['.ts', '.tsx', '.scss', '.html']);
+  const restaurantFiles = restaurantParser.parseDirectory(restaurantPath, ['.ts', '.tsx', '.scss', '.html']);
 
   console.log('Matching files...');
   const matcher = new FileMatcher(retailPath, restaurantPath);

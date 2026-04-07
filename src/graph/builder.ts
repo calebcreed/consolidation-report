@@ -13,6 +13,8 @@ export class GraphBuilder {
   private filesByPath: Map<string, string> = new Map();       // absolute path -> node id
   private filesByClass: Map<string, string> = new Map();      // class name -> node id
   private filesBySelector: Map<string, string> = new Map();   // selector -> node id
+  private filesByAction: Map<string, string> = new Map();     // action name/identifier -> node id
+  private filesBySelector2: Map<string, string> = new Map();  // NgRx selector name -> node id
 
   constructor(config: Config) {
     this.config = config;
@@ -166,6 +168,23 @@ export class GraphBuilder {
     if (metadata?.selector) {
       this.filesBySelector.set(metadata.selector, node.id);
     }
+
+    // Index NgRx patterns
+    const file = retailFile || restaurantFile;
+    if (file?.ngrx) {
+      // Index action names (e.g., '[Cart] Add Item')
+      for (const actionName of file.ngrx.actionNames) {
+        this.filesByAction.set(actionName, node.id);
+      }
+      // Index action identifiers (e.g., 'addItem', 'LoadProducts')
+      for (const actionId of file.ngrx.actionIdentifiers) {
+        this.filesByAction.set(actionId, node.id);
+      }
+      // Index selector names
+      for (const selectorName of file.ngrx.selectorNames) {
+        this.filesBySelector2.set(selectorName, node.id);
+      }
+    }
   }
 
   private findNodeIdForFile(filePath: string): string | null {
@@ -240,6 +259,24 @@ export class GraphBuilder {
 
       if (targetId && targetId !== nodeId) {
         this.addEdge(nodeId, targetId, ref.type === 'pipe' ? 'template-pipe' : 'template-selector');
+      }
+    }
+
+    // NgRx action references (from reducers/effects to action files)
+    if (file.ngrx) {
+      for (const actionRef of file.ngrx.referencedActions) {
+        const targetId = this.filesByAction.get(actionRef);
+        if (targetId && targetId !== nodeId) {
+          this.addEdge(nodeId, targetId, 'ngrx-action');
+        }
+      }
+
+      // NgRx selector references (from components/effects to selector files)
+      for (const selectorRef of file.ngrx.referencedSelectors) {
+        const targetId = this.filesBySelector2.get(selectorRef);
+        if (targetId && targetId !== nodeId) {
+          this.addEdge(nodeId, targetId, 'ngrx-selector');
+        }
       }
     }
   }
