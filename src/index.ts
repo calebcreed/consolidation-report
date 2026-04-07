@@ -149,13 +149,15 @@ async function runValidation(options: {
   console.log(`Coverage:              ${((totalParsed / totalShell) * 100).toFixed(1)}%`);
 }
 
-function getNextReportPath(dir: string = '.'): string {
-  const resolvedDir = path.resolve(dir);
-  if (!fs.existsSync(resolvedDir)) {
-    return path.join(resolvedDir, 'report1.html');
+function getNextReportPath(): string {
+  // Default to /reports directory relative to this script's location
+  const reportsDir = path.join(__dirname, '..', 'reports');
+
+  if (!fs.existsSync(reportsDir)) {
+    fs.mkdirSync(reportsDir, { recursive: true });
   }
 
-  const files = fs.readdirSync(resolvedDir);
+  const files = fs.readdirSync(reportsDir);
   const reportPattern = /^report(\d+)\.html$/;
   let maxNum = 0;
 
@@ -167,7 +169,7 @@ function getNextReportPath(dir: string = '.'): string {
     }
   }
 
-  return path.join(resolvedDir, `report${maxNum + 1}.html`);
+  return path.join(reportsDir, `report${maxNum + 1}.html`);
 }
 
 async function runAnalysis(options: {
@@ -182,7 +184,7 @@ async function runAnalysis(options: {
   const retailPath = path.resolve(options.retail);
   const restaurantPath = path.resolve(options.restaurant);
   const sharedPath = path.resolve(options.shared);
-  const outputPath = options.output ? path.resolve(options.output) : getNextReportPath('.');
+  const outputPath = options.output ? path.resolve(options.output) : getNextReportPath();
   const mappingPath = path.resolve(options.mapping);
   const repoRoot = options.repoRoot ? path.resolve(options.repoRoot) : findGitRoot(retailPath);
 
