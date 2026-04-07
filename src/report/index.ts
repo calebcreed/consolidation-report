@@ -447,11 +447,17 @@ ${this.escapeJsonForHtml(JSON.stringify(data))}
 
     function renderMovableList() {
       const container = document.getElementById('movable-list');
-      container.innerHTML = '';
 
-      for (const tree of DATA.movableTrees) {
-        const node = DATA.nodes.find(n => n.id === tree.rootId);
-        container.innerHTML += \`
+      if (DATA.movableTrees.length === 0) {
+        container.innerHTML = '<div class="tree-item"><span style="color:#8b949e">No clean subtrees found</span></div>';
+        return;
+      }
+
+      // Build HTML efficiently - limit to first 50 trees
+      const trees = DATA.movableTrees.slice(0, 50);
+      let html = '';
+      for (const tree of trees) {
+        html += \`
           <div class="tree-item">
             <div class="tree-header">
               <span class="file-path">\${tree.rootId}</span>
@@ -463,15 +469,14 @@ ${this.escapeJsonForHtml(JSON.stringify(data))}
           </div>
         \`;
       }
-
-      if (DATA.movableTrees.length === 0) {
-        container.innerHTML = '<div class="tree-item"><span style="color:#8b949e">No clean subtrees found</span></div>';
+      if (DATA.movableTrees.length > 50) {
+        html += '<div class="tree-item"><span style="color:#8b949e">... and ' + (DATA.movableTrees.length - 50) + ' more</span></div>';
       }
+      container.innerHTML = html;
     }
 
     function renderConflictList() {
       const container = document.getElementById('conflict-list');
-      container.innerHTML = '';
 
       const conflicts = DATA.nodes.filter(n => n.divergence?.type === 'CONFLICT');
       conflicts.sort((a, b) => {
@@ -480,9 +485,16 @@ ${this.escapeJsonForHtml(JSON.stringify(data))}
         return bTotal - aTotal;
       });
 
-      for (const node of conflicts) {
-        container.innerHTML += renderFileItem(node);
+      // Limit to first 100 conflicts
+      const limited = conflicts.slice(0, 100);
+      let html = '';
+      for (const node of limited) {
+        html += renderFileItem(node);
       }
+      if (conflicts.length > 100) {
+        html += '<div style="padding:15px;color:#8b949e;">... and ' + (conflicts.length - 100) + ' more conflicts. Use the All Files tab to see all.</div>';
+      }
+      container.innerHTML = html;
 
       container.querySelectorAll('.file-item').forEach(item => {
         item.addEventListener('click', () => item.classList.toggle('expanded'));
