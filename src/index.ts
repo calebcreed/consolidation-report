@@ -123,7 +123,7 @@ program
   .requiredOption('-f, --files <ids>', 'Comma-separated node IDs to migrate (or "all-clean" for all clean subtrees)')
   .option('--repo-root <path>', 'Git repository root (default: auto-detect)')
   .option('--dry-run', 'Show what would be done without making changes', false)
-  .option('--no-delete', 'Do not delete original files after migration')
+  .option('--delete', 'Delete original files after migration (use --no-delete to keep)', true)
   .action(async (options) => {
     try {
       await runMigrate(options);
@@ -304,7 +304,7 @@ async function runMigrate(options: {
   const restaurantPath = path.resolve(options.restaurant);
   const sharedPath = path.resolve(options.shared);
   const repoRoot = options.repoRoot ? path.resolve(options.repoRoot) : findGitRoot(retailPath);
-  const deleteOriginals = options.delete !== false; // --no-delete sets delete to false
+  const deleteOriginals = options.delete; // default true, --no-delete sets to false
 
   console.log('Migration Tool');
   console.log('==============');
