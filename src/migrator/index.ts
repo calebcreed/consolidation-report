@@ -199,7 +199,7 @@ export class Migrator {
       const targetPath = path.join(this.sharedPath, targetRelative);
 
       // Find associated files (template, styles, spec)
-      const associatedFiles = this.findAssociatedFiles(sourcePath);
+      const associatedFiles = this.findAssociatedFiles(sourcePath, warnings);
 
       filesToMove.push({
         nodeId,
@@ -304,13 +304,72 @@ export class Migrator {
 
   /**
    * Find associated files for a TypeScript file (template, styles, spec)
+   * Parses @Component decorator to find templateUrl and styleUrls
    */
-  private findAssociatedFiles(tsFilePath: string): string[] {
+  private findAssociatedFiles(tsFilePath: string, warnings: string[]): string[] {
     const associated: string[] = [];
     const dir = path.dirname(tsFilePath);
     const baseName = path.basename(tsFilePath, path.extname(tsFilePath));
 
-    // Common associated file patterns
+    // Try to parse the file for @Component decorator
+    if (fs.existsSync(tsFilePath)) {
+      try {
+        const content = fs.readFileSync(tsFilePath, 'utf-8');
+
+        // Find templateUrl
+        const templateMatch = content.match(/templateUrl\s*:\s*['"]([^'"]+)['"]/);
+        if (templateMatch) {
+          const templatePath = path.resolve(dir, templateMatch[1]);
+          if (fs.existsSync(templatePath)) {
+            associated.push(templatePath);
+          } else {
+            // Try both retail and restaurant directories
+            const relativePath = templateMatch[1];
+            const retailTemplate = path.resolve(path.dirname(tsFilePath.replace(this.restaurantPath, this.retailPath)), relativePath);
+            const restaurantTemplate = path.resolve(path.dirname(tsFilePath.replace(this.retailPath, this.restaurantPath)), relativePath);
+
+            if (fs.existsSync(retailTemplate)) {
+              associated.push(retailTemplate);
+            } else if (fs.existsSync(restaurantTemplate)) {
+              associated.push(restaurantTemplate);
+            } else {
+              warnings.push(`Template not found: ${templateMatch[1]} for ${path.basename(tsFilePath)}`);
+            }
+          }
+        }
+
+        // Find styleUrls (array of styles)
+        const styleMatch = content.match(/styleUrls\s*:\s*\[([^\]]+)\]/);
+        if (styleMatch) {
+          const styleUrls = styleMatch[1].match(/['"]([^'"]+)['"]/g);
+          if (styleUrls) {
+            for (const styleUrl of styleUrls) {
+              const stylePath = styleUrl.replace(/['"]/g, '');
+              const resolvedStyle = path.resolve(dir, stylePath);
+              if (fs.existsSync(resolvedStyle)) {
+                associated.push(resolvedStyle);
+              } else {
+                // Try both directories
+                const retailStyle = path.resolve(path.dirname(tsFilePath.replace(this.restaurantPath, this.retailPath)), stylePath);
+                const restaurantStyle = path.resolve(path.dirname(tsFilePath.replace(this.retailPath, this.restaurantPath)), stylePath);
+
+                if (fs.existsSync(retailStyle)) {
+                  associated.push(retailStyle);
+                } else if (fs.existsSync(restaurantStyle)) {
+                  associated.push(restaurantStyle);
+                } else {
+                  warnings.push(`Style not found: ${stylePath} for ${path.basename(tsFilePath)}`);
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        // Fall through to pattern-based detection
+      }
+    }
+
+    // Also check common patterns as fallback
     const patterns = [
       `${baseName}.html`,
       `${baseName}.scss`,
@@ -322,7 +381,7 @@ export class Migrator {
 
     for (const pattern of patterns) {
       const filePath = path.join(dir, pattern);
-      if (fs.existsSync(filePath)) {
+      if (fs.existsSync(filePath) && !associated.includes(filePath)) {
         associated.push(filePath);
       }
     }
