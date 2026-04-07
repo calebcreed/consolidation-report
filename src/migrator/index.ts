@@ -532,8 +532,12 @@ export class Migrator {
         const currentDir = path.dirname(filePath);
         resolvedImport = path.resolve(currentDir, importPath);
 
-        // Handle missing extension
-        if (!path.extname(resolvedImport)) {
+        // Handle missing extension - .component, .pipe, .modal etc. are NOT real extensions
+        const ext = path.extname(resolvedImport);
+        const isRealExtension = ['.ts', '.tsx', '.js', '.jsx', '.json'].includes(ext);
+
+        if (!isRealExtension) {
+          // Try adding extensions
           if (fs.existsSync(resolvedImport + '.ts')) {
             resolvedImport += '.ts';
           } else if (fs.existsSync(resolvedImport + '.tsx')) {
