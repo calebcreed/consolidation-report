@@ -122,6 +122,7 @@ program
   .requiredOption('-s, --shared <path>', 'Path to shared directory')
   .requiredOption('-f, --files <ids>', 'Comma-separated node IDs to migrate (or "all-clean" for all clean subtrees)')
   .option('--repo-root <path>', 'Git repository root (default: auto-detect)')
+  .option('--tsconfig <path>', 'Path to tsconfig.json to resolve path aliases (e.g., @app/)')
   .option('--dry-run', 'Show what would be done without making changes', false)
   .option('--delete', 'Delete original files after migration (use --no-delete to keep)', true)
   .action(async (options) => {
@@ -297,6 +298,7 @@ async function runMigrate(options: {
   shared: string;
   files: string;
   repoRoot?: string;
+  tsconfig?: string;
   dryRun: boolean;
   delete: boolean;
 }) {
@@ -373,7 +375,12 @@ async function runMigrate(options: {
   const analyzer = new GraphAnalyzer();
   analyzer.analyze(nodes, edges);
 
-  const migrator = new Migrator(retailPath, restaurantPath, sharedPath, nodes, edges);
+  // Step 6: Create migrator (with optional tsconfig for path aliases)
+  if (options.tsconfig) {
+    console.log(`Loading tsconfig from: ${options.tsconfig}`);
+  }
+  const tsconfigPath = options.tsconfig ? path.resolve(options.tsconfig) : undefined;
+  const migrator = new Migrator(retailPath, restaurantPath, sharedPath, nodes, edges, tsconfigPath);
 
   // Determine which files to migrate
   let nodeIds: string[];

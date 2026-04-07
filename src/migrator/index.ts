@@ -24,6 +24,11 @@ export interface BarrelUpdate {
   exportToRemove: string;    // Old export to remove (if any)
 }
 
+export interface PathAlias {
+  alias: string;             // e.g., "@app/*"
+  paths: string[];           // e.g., ["src/app/*"]
+}
+
 export interface MigrationPlan {
   files: MigrationFile[];
   importUpdates: ImportUpdate[];
@@ -45,19 +50,113 @@ export class Migrator {
   private sharedPath: string;
   private nodes: Map<string, FileNode>;
   private edges: DependencyEdge[];
+  private pathAliases: PathAlias[] = [];
+  private tsconfigBaseDir: string = '';
 
   constructor(
     retailPath: string,
     restaurantPath: string,
     sharedPath: string,
     nodes: Map<string, FileNode>,
-    edges: DependencyEdge[]
+    edges: DependencyEdge[],
+    tsconfigPath?: string
   ) {
     this.retailPath = retailPath;
     this.restaurantPath = restaurantPath;
     this.sharedPath = sharedPath;
     this.nodes = nodes;
     this.edges = edges;
+
+    if (tsconfigPath) {
+      this.loadTsConfig(tsconfigPath);
+    }
+  }
+
+  /**
+   * Load and parse tsconfig.json to extract path aliases
+   */
+  private loadTsConfig(tsconfigPath: string): void {
+    try {
+      const absolutePath = path.resolve(tsconfigPath);
+      this.tsconfigBaseDir = path.dirname(absolutePath);
+
+      const content = fs.readFileSync(absolutePath, 'utf-8');
+      // Remove comments (simple approach - doesn't handle all edge cases)
+      const jsonContent = content.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, '');
+      const tsconfig = JSON.parse(jsonContent);
+
+      const paths = tsconfig.compilerOptions?.paths || {};
+      const baseUrl = tsconfig.compilerOptions?.baseUrl || '.';
+      const baseUrlAbsolute = path.resolve(this.tsconfigBaseDir, baseUrl);
+
+      for (const [alias, aliasPaths] of Object.entries(paths)) {
+        this.pathAliases.push({
+          alias,
+          paths: (aliasPaths as string[]).map(p => path.resolve(baseUrlAbsolute, p)),
+        });
+      }
+
+      console.log(`  Loaded ${this.pathAliases.length} path aliases from tsconfig`);
+      for (const pa of this.pathAliases.slice(0, 5)) {
+        console.log(`    ${pa.alias} -> ${pa.paths[0]}`);
+      }
+      if (this.pathAliases.length > 5) {
+        console.log(`    ... and ${this.pathAliases.length - 5} more`);
+      }
+    } catch (err) {
+      console.warn(`  Warning: Could not load tsconfig: ${err}`);
+    }
+  }
+
+  /**
+   * Resolve a path alias import to an absolute file path
+   */
+  private resolveAliasedImport(importPath: string): string | null {
+    for (const { alias, paths } of this.pathAliases) {
+      // Handle wildcard aliases like "@app/*"
+      if (alias.endsWith('/*')) {
+        const aliasPrefix = alias.slice(0, -2); // "@app"
+        if (importPath.startsWith(aliasPrefix + '/')) {
+          const remainder = importPath.slice(aliasPrefix.length + 1); // "modules/foo"
+          for (const aliasPath of paths) {
+            const basePath = aliasPath.slice(0, -2); // Remove "/*"
+            const resolved = path.join(basePath, remainder);
+
+            // Try with various extensions
+            if (fs.existsSync(resolved + '.ts')) return resolved + '.ts';
+            if (fs.existsSync(resolved + '.tsx')) return resolved + '.tsx';
+            if (fs.existsSync(resolved + '/index.ts')) return resolved + '/index.ts';
+            if (fs.existsSync(resolved)) return resolved;
+          }
+        }
+      } else if (alias === importPath) {
+        // Exact match alias
+        for (const aliasPath of paths) {
+          if (fs.existsSync(aliasPath + '.ts')) return aliasPath + '.ts';
+          if (fs.existsSync(aliasPath + '/index.ts')) return aliasPath + '/index.ts';
+          if (fs.existsSync(aliasPath)) return aliasPath;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Check if an import path uses a path alias
+   */
+  private isAliasedImport(importPath: string): boolean {
+    // Relative imports are not aliased
+    if (importPath.startsWith('.') || importPath.startsWith('/')) {
+      return false;
+    }
+    // Check if it matches any alias
+    for (const { alias } of this.pathAliases) {
+      const aliasPrefix = alias.endsWith('/*') ? alias.slice(0, -2) : alias;
+      if (importPath === aliasPrefix || importPath.startsWith(aliasPrefix + '/')) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -353,7 +452,6 @@ export class Migrator {
     if (!fs.existsSync(filePath)) return updates;
 
     const content = fs.readFileSync(filePath, 'utf-8');
-    const lines = content.split('\n');
 
     // Determine where this file will be after migration
     const movedFile = filesToMove.find(f => f.sourcePath === filePath);
@@ -365,26 +463,32 @@ export class Migrator {
 
     while ((match = importRegex.exec(content)) !== null) {
       const importPath = match[2];
+      let resolvedImport: string | null = null;
 
-      // Skip external packages
-      if (!importPath.startsWith('.') && !importPath.startsWith('/')) {
+      // Check if this is an aliased import (e.g., @app/modules/...)
+      if (this.isAliasedImport(importPath)) {
+        resolvedImport = this.resolveAliasedImport(importPath);
+      } else if (importPath.startsWith('.') || importPath.startsWith('/')) {
+        // Relative or absolute import
+        const currentDir = path.dirname(filePath);
+        resolvedImport = path.resolve(currentDir, importPath);
+
+        // Handle missing extension
+        if (!path.extname(resolvedImport)) {
+          if (fs.existsSync(resolvedImport + '.ts')) {
+            resolvedImport += '.ts';
+          } else if (fs.existsSync(resolvedImport + '.tsx')) {
+            resolvedImport += '.tsx';
+          } else if (fs.existsSync(path.join(resolvedImport, 'index.ts'))) {
+            resolvedImport = path.join(resolvedImport, 'index.ts');
+          }
+        }
+      } else {
+        // External package - skip
         continue;
       }
 
-      // Resolve the import to absolute path
-      const currentDir = path.dirname(filePath);
-      let resolvedImport = path.resolve(currentDir, importPath);
-
-      // Handle missing extension
-      if (!path.extname(resolvedImport)) {
-        if (fs.existsSync(resolvedImport + '.ts')) {
-          resolvedImport += '.ts';
-        } else if (fs.existsSync(resolvedImport + '.tsx')) {
-          resolvedImport += '.tsx';
-        } else if (fs.existsSync(path.join(resolvedImport, 'index.ts'))) {
-          resolvedImport = path.join(resolvedImport, 'index.ts');
-        }
-      }
+      if (!resolvedImport) continue;
 
       // Check if this import needs to be rewritten
       const newTargetPath = pathMapping.get(resolvedImport);
