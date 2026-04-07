@@ -22,7 +22,7 @@ program
   .description('Run full analysis and generate report')
   .requiredOption('-r, --retail <path>', 'Path to retail app directory')
   .requiredOption('-t, --restaurant <path>', 'Path to restaurant app directory')
-  .requiredOption('-b, --base-commit <hash>', 'Git commit hash of the common ancestor (before split)')
+  .option('-b, --base-commit <hash>', 'Git commit hash of the common ancestor (optional, enables three-way diff)')
   .option('-s, --shared <path>', 'Path to shared directory', './shared')
   .option('-o, --output <path>', 'Output path for HTML report', './consolidation-report.html')
   .option('-m, --mapping <path>', 'Path to mapping file (will create if not exists)', './consolidation-mapping.json')
@@ -56,7 +56,7 @@ program
   .description('Show quick statistics without full report')
   .requiredOption('-r, --retail <path>', 'Path to retail app directory')
   .requiredOption('-t, --restaurant <path>', 'Path to restaurant app directory')
-  .requiredOption('-b, --base-commit <hash>', 'Git commit hash of the common ancestor')
+  .option('-b, --base-commit <hash>', 'Git commit hash of the common ancestor (optional)')
   .option('--repo-root <path>', 'Git repository root')
   .action(async (options) => {
     try {
@@ -88,7 +88,7 @@ async function runAnalysis(options: {
   console.log(`Retail:      ${retailPath}`);
   console.log(`Restaurant:  ${restaurantPath}`);
   console.log(`Shared:      ${sharedPath}`);
-  console.log(`Base commit: ${options.baseCommit}`);
+  console.log(`Base commit: ${options.baseCommit || '(none - two-way diff mode)'}`);
   console.log(`Repo root:   ${repoRoot}`);
   console.log('');
 
@@ -126,8 +126,8 @@ async function runAnalysis(options: {
   console.log(`  Saved mapping to ${mappingPath}`);
 
   // Step 3: Compute diffs
-  console.log('Step 3/5: Computing three-way diffs...');
-  const differ = new GitDiffer(repoRoot, options.baseCommit);
+  console.log(`Step 3/5: Computing ${options.baseCommit ? 'three-way' : 'two-way'} diffs...`);
+  const differ = new GitDiffer(repoRoot, options.baseCommit || null);
   const diffResults = new Map<string, ThreeWayDiffResult>();
 
   let processed = 0;
@@ -163,7 +163,7 @@ async function runAnalysis(options: {
     retailPath,
     restaurantPath,
     sharedPath,
-    baseCommit: options.baseCommit,
+    baseCommit: options.baseCommit || null,
     outputPath,
     mappingFile: mappingPath,
     fileExtensions: ['.ts'],
@@ -238,7 +238,7 @@ async function runMatching(options: {
 async function runStats(options: {
   retail: string;
   restaurant: string;
-  baseCommit: string;
+  baseCommit?: string;
   repoRoot?: string;
 }) {
   const retailPath = path.resolve(options.retail);
@@ -256,8 +256,8 @@ async function runStats(options: {
   const matcher = new FileMatcher(retailPath, restaurantPath);
   const matchResult = matcher.match(retailFiles, restaurantFiles);
 
-  console.log('Computing diffs...');
-  const differ = new GitDiffer(repoRoot, options.baseCommit);
+  console.log(`Computing ${options.baseCommit ? 'three-way' : 'two-way'} diffs...`);
+  const differ = new GitDiffer(repoRoot, options.baseCommit || null);
 
   let clean = 0, sameChange = 0, retailOnly = 0, restaurantOnly = 0, conflict = 0;
 

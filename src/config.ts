@@ -3,7 +3,7 @@ export interface Config {
   retailPath: string;
   restaurantPath: string;
   sharedPath: string;
-  baseCommit: string;
+  baseCommit: string | null;
   outputPath: string;
   mappingFile?: string;
   fileExtensions: string[];

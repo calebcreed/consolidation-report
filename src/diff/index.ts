@@ -12,9 +12,9 @@ export interface ThreeWayDiffResult {
 
 export class GitDiffer {
   private repoRoot: string;
-  private baseCommit: string;
+  private baseCommit: string | null;
 
-  constructor(repoRoot: string, baseCommit: string) {
+  constructor(repoRoot: string, baseCommit: string | null) {
     this.repoRoot = repoRoot;
     this.baseCommit = baseCommit;
   }
@@ -76,20 +76,22 @@ export class GitDiffer {
     baseRetailPath?: string,
     baseRestaurantPath?: string
   ): ThreeWayDiffResult {
-    // Get base content (try retail path first, then restaurant path)
+    // Get base content (only if baseCommit is provided)
     let baseContent: string | null = null;
-    if (baseRetailPath) {
-      baseContent = this.getFileAtCommit(baseRetailPath, this.baseCommit);
-    }
-    if (!baseContent && baseRestaurantPath) {
-      baseContent = this.getFileAtCommit(baseRestaurantPath, this.baseCommit);
-    }
-    // Try current paths if base paths don't work
-    if (!baseContent && retailPath) {
-      baseContent = this.getFileAtCommit(retailPath, this.baseCommit);
-    }
-    if (!baseContent && restaurantPath) {
-      baseContent = this.getFileAtCommit(restaurantPath, this.baseCommit);
+    if (this.baseCommit) {
+      if (baseRetailPath) {
+        baseContent = this.getFileAtCommit(baseRetailPath, this.baseCommit);
+      }
+      if (!baseContent && baseRestaurantPath) {
+        baseContent = this.getFileAtCommit(baseRestaurantPath, this.baseCommit);
+      }
+      // Try current paths if base paths don't work
+      if (!baseContent && retailPath) {
+        baseContent = this.getFileAtCommit(retailPath, this.baseCommit);
+      }
+      if (!baseContent && restaurantPath) {
+        baseContent = this.getFileAtCommit(restaurantPath, this.baseCommit);
+      }
     }
 
     const retailContent = retailPath ? this.getCurrentContent(retailPath) : null;
@@ -131,14 +133,18 @@ export class GitDiffer {
     const normalizedRetail = this.normalizeContent(retail);
     const normalizedRestaurant = this.normalizeContent(restaurant);
 
-    // No base means file was added after split
+    // No base means file was added after split OR two-way diff mode
     if (!normalizedBase) {
       if (normalizedRetail && normalizedRestaurant) {
         if (normalizedRetail === normalizedRestaurant) {
-          result.type = 'SAME_CHANGE';
+          result.type = 'CLEAN'; // Identical in both branches
         } else {
           result.type = 'CONFLICT';
           result.autoMergeable = false;
+          // In two-way mode, show the diff between retail and restaurant
+          result.retailChanges = this.countChanges(normalizedRestaurant, normalizedRetail);
+          result.restaurantChanges = this.countChanges(normalizedRetail, normalizedRestaurant);
+          result.conflictRegions = this.findConflictRegions(normalizedRetail, normalizedRestaurant, normalizedRetail);
         }
       } else if (normalizedRetail) {
         result.type = 'RETAIL_ONLY';
