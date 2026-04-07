@@ -81,9 +81,28 @@ export class Migrator {
       this.tsconfigBaseDir = path.dirname(absolutePath);
 
       const content = fs.readFileSync(absolutePath, 'utf-8');
-      // Remove comments (simple approach - doesn't handle all edge cases)
-      const jsonContent = content.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, '');
-      const tsconfig = JSON.parse(jsonContent);
+      // Try parsing directly first, then try stripping single-line comments only
+      let tsconfig;
+      try {
+        tsconfig = JSON.parse(content);
+      } catch {
+        // Strip only single-line comments (// ...) not inside strings
+        // Avoid stripping /* */ as it breaks paths like "@app/*"
+        const lines = content.split('\n');
+        const cleanedLines = lines.map(line => {
+          // Only strip // comments that aren't inside a string
+          const stringMatch = line.match(/^([^"]*"[^"]*")*[^"]*/);
+          if (stringMatch) {
+            const beforeStrings = stringMatch[0];
+            const commentIndex = beforeStrings.indexOf('//');
+            if (commentIndex !== -1) {
+              return line.substring(0, line.indexOf('//'));
+            }
+          }
+          return line;
+        });
+        tsconfig = JSON.parse(cleanedLines.join('\n'));
+      }
 
       const paths = tsconfig.compilerOptions?.paths || {};
       const baseUrl = tsconfig.compilerOptions?.baseUrl || '.';
