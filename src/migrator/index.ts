@@ -314,7 +314,7 @@ export class Migrator {
 
     // Calculate import updates for each file
     for (const filePath of filesToUpdate) {
-      const updates = this.calculateImportUpdates(filePath, pathMapping, filesToMove);
+      const updates = this.calculateImportUpdates(filePath, pathMapping, filesToMove, warnings);
       importUpdates.push(...updates);
     }
 
@@ -542,7 +542,8 @@ export class Migrator {
   private calculateImportUpdates(
     filePath: string,
     pathMapping: Map<string, string>,
-    filesToMove: MigrationFile[]
+    filesToMove: MigrationFile[],
+    warnings: string[]
   ): ImportUpdate[] {
     const updates: ImportUpdate[] = [];
 
@@ -553,6 +554,7 @@ export class Migrator {
     // Determine where this file will be after migration
     const movedFile = filesToMove.find(f => f.sourcePath === filePath);
     const effectiveFilePath = movedFile ? movedFile.targetPath : filePath;
+    const isBeingMoved = !!movedFile;
 
     // Find import statements
     const importRegex = /^(import\s+.*?from\s+['"])([^'"]+)(['"])/gm;
@@ -565,20 +567,55 @@ export class Migrator {
       // Check if this is an aliased import (e.g., @app/modules/...)
       if (this.isAliasedImport(importPath)) {
         resolvedImport = this.resolveAliasedImport(importPath);
+        if (!resolvedImport && isBeingMoved) {
+          warnings.push(`Cannot resolve aliased import '${importPath}' in ${path.basename(filePath)}`);
+        }
       } else if (importPath.startsWith('.') || importPath.startsWith('/')) {
         // Relative or absolute import
         const currentDir = path.dirname(filePath);
-        resolvedImport = path.resolve(currentDir, importPath);
+        const basePath = path.resolve(currentDir, importPath);
 
         // Always try to resolve to actual file - try .ts first, then other options
-        // This handles: ./foo, ./foo.component, ./foo.pipe, ./folder, etc.
-        resolvedImport = this.resolveToFile(resolvedImport);
+        resolvedImport = this.resolveToFile(basePath);
+
+        if (!resolvedImport && isBeingMoved) {
+          warnings.push(`Cannot resolve import '${importPath}' in ${path.basename(filePath)} (tried ${basePath}.ts)`);
+        }
       } else {
         // External package - skip
         continue;
       }
 
       if (!resolvedImport) continue;
+
+      // Check if this file is being moved but the import target is NOT being moved
+      if (isBeingMoved && !pathMapping.has(resolvedImport)) {
+        // The imported file stays in place - need to update path to point back
+        const newDir = path.dirname(effectiveFilePath);
+        let newImport = path.relative(newDir, resolvedImport);
+
+        // Remove extension for cleaner imports
+        newImport = newImport.replace(/\.(ts|tsx)$/, '');
+
+        // Ensure it starts with ./ or ../
+        if (!newImport.startsWith('.')) {
+          newImport = './' + newImport;
+        }
+
+        // Normalize path separators
+        newImport = newImport.replace(/\\/g, '/');
+
+        if (newImport !== importPath) {
+          const lineIndex = content.substring(0, match.index).split('\n').length;
+          updates.push({
+            filePath,
+            oldImport: importPath,
+            newImport,
+            line: lineIndex,
+          });
+        }
+        continue;
+      }
 
       // Check if this import needs to be rewritten
       const newTargetPath = pathMapping.get(resolvedImport);
