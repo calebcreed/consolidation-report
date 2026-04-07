@@ -25,7 +25,7 @@ program
   .requiredOption('-t, --restaurant <path>', 'Path to restaurant app directory')
   .option('-b, --base-commit <hash>', 'Git commit hash of the common ancestor (optional, enables three-way diff)')
   .option('-s, --shared <path>', 'Path to shared directory', './shared')
-  .option('-o, --output <path>', 'Output path for HTML report', './consolidation-report.html')
+  .option('-o, --output <path>', 'Output path for HTML report (default: auto-increment report1.html, report2.html, etc.)')
   .option('-m, --mapping <path>', 'Path to mapping file (will create if not exists)', './consolidation-mapping.json')
   .option('--repo-root <path>', 'Git repository root (default: auto-detect)')
   .action(async (options) => {
@@ -149,19 +149,40 @@ async function runValidation(options: {
   console.log(`Coverage:              ${((totalParsed / totalShell) * 100).toFixed(1)}%`);
 }
 
+function getNextReportPath(dir: string = '.'): string {
+  const resolvedDir = path.resolve(dir);
+  if (!fs.existsSync(resolvedDir)) {
+    return path.join(resolvedDir, 'report1.html');
+  }
+
+  const files = fs.readdirSync(resolvedDir);
+  const reportPattern = /^report(\d+)\.html$/;
+  let maxNum = 0;
+
+  for (const file of files) {
+    const match = file.match(reportPattern);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (num > maxNum) maxNum = num;
+    }
+  }
+
+  return path.join(resolvedDir, `report${maxNum + 1}.html`);
+}
+
 async function runAnalysis(options: {
   retail: string;
   restaurant: string;
   baseCommit: string;
   shared: string;
-  output: string;
+  output?: string;
   mapping: string;
   repoRoot?: string;
 }) {
   const retailPath = path.resolve(options.retail);
   const restaurantPath = path.resolve(options.restaurant);
   const sharedPath = path.resolve(options.shared);
-  const outputPath = path.resolve(options.output);
+  const outputPath = options.output ? path.resolve(options.output) : getNextReportPath('.');
   const mappingPath = path.resolve(options.mapping);
   const repoRoot = options.repoRoot ? path.resolve(options.repoRoot) : findGitRoot(retailPath);
 
@@ -172,6 +193,7 @@ async function runAnalysis(options: {
   console.log(`Shared:      ${sharedPath}`);
   console.log(`Base commit: ${options.baseCommit || '(none - two-way diff mode)'}`);
   console.log(`Repo root:   ${repoRoot}`);
+  console.log(`Output:      ${outputPath}`);
   console.log('');
 
   // Step 1: Parse files
