@@ -243,27 +243,48 @@ async function runMigrateList(options: {
     return;
   }
 
+  // Calculate totals across ALL subtrees
   let totalFiles = 0;
-  for (const tree of movable.slice(0, 50)) {
-    console.log(`${tree.rootId}`);
-    console.log(`  Files: ${tree.totalFiles}`);
-    if (tree.nodeIds.length <= 5) {
-      for (const id of tree.nodeIds) {
-        console.log(`    - ${id}`);
-      }
-    } else {
-      for (const id of tree.nodeIds.slice(0, 3)) {
-        console.log(`    - ${id}`);
-      }
-      console.log(`    ... and ${tree.nodeIds.length - 3} more`);
-    }
-    console.log('');
+  let singleFileSubtrees = 0;
+  let multiFileSubtrees = 0;
+  for (const tree of movable) {
     totalFiles += tree.totalFiles;
+    if (tree.totalFiles === 1) {
+      singleFileSubtrees++;
+    } else {
+      multiFileSubtrees++;
+    }
   }
 
+  // Show summary first
   console.log('---');
   console.log(`Total movable subtrees: ${movable.length}`);
-  console.log(`Total files: ${totalFiles}`);
+  console.log(`  Single-file subtrees: ${singleFileSubtrees}`);
+  console.log(`  Multi-file subtrees:  ${multiFileSubtrees}`);
+  console.log(`Total unique files:     ${totalFiles}`);
+  console.log('');
+
+  // Show largest subtrees (multi-file ones are most interesting)
+  const multiFile = movable.filter(t => t.totalFiles > 1);
+  if (multiFile.length > 0) {
+    console.log(`Largest multi-file subtrees (top ${Math.min(20, multiFile.length)}):`);
+    console.log('');
+    for (const tree of multiFile.slice(0, 20)) {
+      console.log(`${tree.rootId}`);
+      console.log(`  Files: ${tree.totalFiles}`);
+      if (tree.nodeIds.length <= 5) {
+        for (const id of tree.nodeIds) {
+          console.log(`    - ${id}`);
+        }
+      } else {
+        for (const id of tree.nodeIds.slice(0, 3)) {
+          console.log(`    - ${id}`);
+        }
+        console.log(`    ... and ${tree.nodeIds.length - 3} more`);
+      }
+      console.log('');
+    }
+  }
   console.log('\nTo migrate, run:');
   console.log(`  node dist/index.js migrate -r ${options.retail} -t ${options.restaurant} -s ${options.shared} -f <node-id> --dry-run`);
   console.log('\nOr migrate all clean subtrees:');
