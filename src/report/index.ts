@@ -261,7 +261,15 @@ export class ReportGenerator {
 ${this.escapeJsonForHtml(JSON.stringify(data))}
   </script>
   <script>
-    const DATA = JSON.parse(document.getElementById('report-data').textContent);
+    let DATA;
+    try {
+      DATA = JSON.parse(document.getElementById('report-data').textContent);
+      console.log('Loaded DATA:', DATA.nodes.length, 'nodes,', DATA.edges.length, 'edges');
+    } catch (e) {
+      console.error('Failed to parse report data:', e);
+      document.body.innerHTML = '<div style="padding:20px;color:red;">Error loading report data: ' + e.message + '</div>';
+      throw e;
+    }
 
     // Tab switching
     document.querySelectorAll('.tab').forEach(tab => {
@@ -629,9 +637,18 @@ ${this.escapeJsonForHtml(JSON.stringify(data))}
     }
 
     // Initial render
-    renderFileList();
-    renderMovableList();
-    renderConflictList();
+    try {
+      console.log('Rendering file list...');
+      renderFileList();
+      console.log('Rendering movable list...');
+      renderMovableList();
+      console.log('Rendering conflict list...');
+      renderConflictList();
+      console.log('Initial render complete');
+    } catch (e) {
+      console.error('Render error:', e);
+      document.getElementById('file-list').innerHTML = '<div style="padding:20px;color:red;">Render error: ' + e.message + '</div>';
+    }
   </script>
 </body>
 </html>`;
