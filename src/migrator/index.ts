@@ -142,6 +142,44 @@ export class Migrator {
   }
 
   /**
+   * Resolve a path to an actual file, trying various extensions and index files
+   */
+  private resolveToFile(basePath: string): string | null {
+    // 1. Try exact path (already has real extension like .ts)
+    if (fs.existsSync(basePath) && fs.statSync(basePath).isFile()) {
+      return basePath;
+    }
+
+    // 2. Try adding .ts extension (handles ./foo, ./foo.component, ./a-d-c, etc.)
+    if (fs.existsSync(basePath + '.ts')) {
+      return basePath + '.ts';
+    }
+
+    // 3. Try adding .tsx extension
+    if (fs.existsSync(basePath + '.tsx')) {
+      return basePath + '.tsx';
+    }
+
+    // 4. Try as directory with index.ts (handles ./folder -> ./folder/index.ts)
+    if (fs.existsSync(path.join(basePath, 'index.ts'))) {
+      return path.join(basePath, 'index.ts');
+    }
+
+    // 5. Try adding .js extension (for compiled files)
+    if (fs.existsSync(basePath + '.js')) {
+      return basePath + '.js';
+    }
+
+    // 6. Try directory with index.js
+    if (fs.existsSync(path.join(basePath, 'index.js'))) {
+      return path.join(basePath, 'index.js');
+    }
+
+    // Could not resolve
+    return null;
+  }
+
+  /**
    * Check if an import path uses a path alias
    */
   private isAliasedImport(importPath: string): boolean {
@@ -532,20 +570,9 @@ export class Migrator {
         const currentDir = path.dirname(filePath);
         resolvedImport = path.resolve(currentDir, importPath);
 
-        // Handle missing extension - .component, .pipe, .modal etc. are NOT real extensions
-        const ext = path.extname(resolvedImport);
-        const isRealExtension = ['.ts', '.tsx', '.js', '.jsx', '.json'].includes(ext);
-
-        if (!isRealExtension) {
-          // Try adding extensions
-          if (fs.existsSync(resolvedImport + '.ts')) {
-            resolvedImport += '.ts';
-          } else if (fs.existsSync(resolvedImport + '.tsx')) {
-            resolvedImport += '.tsx';
-          } else if (fs.existsSync(path.join(resolvedImport, 'index.ts'))) {
-            resolvedImport = path.join(resolvedImport, 'index.ts');
-          }
-        }
+        // Always try to resolve to actual file - try .ts first, then other options
+        // This handles: ./foo, ./foo.component, ./foo.pipe, ./folder, etc.
+        resolvedImport = this.resolveToFile(resolvedImport);
       } else {
         // External package - skip
         continue;
