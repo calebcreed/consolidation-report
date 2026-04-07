@@ -313,26 +313,34 @@ export class Migrator {
       filesToUpdate.add(file.sourcePath);
     }
 
-    // 2. Files that import moved files need updates
+    // 2. Files that import moved files need updates (check BOTH retail and restaurant)
     for (const node of this.nodes.values()) {
-      const nodePath = node.retailPath || node.restaurantPath;
-      if (!nodePath) continue;
-
       // Check if this node imports any of the moved files
+      let needsUpdate = false;
       for (const depId of node.dependencies) {
         const depNode = this.nodes.get(depId);
         if (!depNode) continue;
 
-        const depPath = depNode.retailPath || depNode.restaurantPath;
-        if (depPath && pathMapping.has(depPath)) {
-          filesToUpdate.add(nodePath);
+        // Check if dependency is being moved (either retail or restaurant path)
+        if ((depNode.retailPath && pathMapping.has(depNode.retailPath)) ||
+            (depNode.restaurantPath && pathMapping.has(depNode.restaurantPath))) {
+          needsUpdate = true;
           break;
         }
       }
+
+      if (needsUpdate) {
+        // Add BOTH retail and restaurant versions for update
+        if (node.retailPath) filesToUpdate.add(node.retailPath);
+        if (node.restaurantPath) filesToUpdate.add(node.restaurantPath);
+      }
     }
 
-    // Calculate import updates for each file
+    // Calculate import updates for each file (skip spec/test files)
     for (const filePath of filesToUpdate) {
+      if (filePath.includes('.spec.') || filePath.includes('.test.')) {
+        continue; // Skip test files - often have stale imports
+      }
       const updates = this.calculateImportUpdates(filePath, pathMapping, filesToMove, warnings);
       importUpdates.push(...updates);
     }
@@ -426,14 +434,12 @@ export class Migrator {
       }
     }
 
-    // Also check common patterns as fallback
+    // Also check common patterns as fallback (skip spec/test files)
     const patterns = [
       `${baseName}.html`,
       `${baseName}.scss`,
       `${baseName}.css`,
       `${baseName}.less`,
-      `${baseName}.spec.ts`,
-      `${baseName}.test.ts`,
     ];
 
     for (const pattern of patterns) {
@@ -586,8 +592,8 @@ export class Migrator {
       // Check if this is an aliased import (e.g., @app/modules/...)
       if (this.isAliasedImport(importPath)) {
         resolvedImport = this.resolveAliasedImport(importPath);
-        if (!resolvedImport && isBeingMoved) {
-          warnings.push(`Cannot resolve aliased import '${importPath}' in ${path.basename(filePath)}`);
+        if (!resolvedImport) {
+          warnings.push(`[ALIAS] Cannot resolve '${importPath}' in ${path.basename(filePath)}`);
         }
       } else if (importPath.startsWith('.') || importPath.startsWith('/')) {
         // Relative or absolute import
@@ -597,8 +603,8 @@ export class Migrator {
         // Always try to resolve to actual file - try .ts first, then other options
         resolvedImport = this.resolveToFile(basePath);
 
-        if (!resolvedImport && isBeingMoved) {
-          warnings.push(`Cannot resolve import '${importPath}' in ${path.basename(filePath)} (tried ${basePath}.ts)`);
+        if (!resolvedImport) {
+          warnings.push(`[RELATIVE] Cannot resolve '${importPath}' in ${path.basename(filePath)} (tried ${basePath}.ts)`);
         }
       } else {
         // External package - skip
