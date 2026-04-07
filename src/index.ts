@@ -203,6 +203,16 @@ async function runAnalysis(options: {
   console.log(`  Retail only: ${matchResult.retailOnly.length} files`);
   console.log(`  Restaurant only: ${matchResult.restaurantOnly.length} files`);
 
+  // Diagnostic check - verify matcher accounts for all parsed files
+  const matcherRetailTotal = matchResult.matched.length + matchResult.retailOnly.length;
+  const matcherRestaurantTotal = matchResult.matched.length + matchResult.restaurantOnly.length;
+  if (matcherRetailTotal !== retailFiles.length) {
+    console.warn(`  WARNING: Matcher accounts for ${matcherRetailTotal} retail files, but parser found ${retailFiles.length} (missing ${retailFiles.length - matcherRetailTotal})`);
+  }
+  if (matcherRestaurantTotal !== restaurantFiles.length) {
+    console.warn(`  WARNING: Matcher accounts for ${matcherRestaurantTotal} restaurant files, but parser found ${restaurantFiles.length} (missing ${restaurantFiles.length - matcherRestaurantTotal})`);
+  }
+
   // Save mapping
   matcher.saveMappingFile(matchResult, mappingPath);
   console.log(`  Saved mapping to ${mappingPath}`);
