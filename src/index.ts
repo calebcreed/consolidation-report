@@ -98,12 +98,13 @@ async function runValidation(options: {
   console.log('');
 
   // Parse files using the Angular parser
-  console.log('Running Angular parser...');
+  console.log('Running Angular parser on retail...');
   const retailParser = new AngularParser(retailPath);
-  const restaurantParser = new AngularParser(restaurantPath);
+  const retailFiles = retailParser.parseDirectory(retailPath, extensions, true);
 
-  const retailFiles = retailParser.parseDirectory(retailPath, extensions);
-  const restaurantFiles = restaurantParser.parseDirectory(restaurantPath, extensions);
+  console.log('Running Angular parser on restaurant...');
+  const restaurantParser = new AngularParser(restaurantPath);
+  const restaurantFiles = restaurantParser.parseDirectory(restaurantPath, extensions, true);
 
   const retailParsedPaths = retailFiles.map(f => f.filePath);
   const restaurantParsedPaths = restaurantFiles.map(f => f.filePath);

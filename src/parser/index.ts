@@ -39,19 +39,28 @@ export class AngularParser {
     });
   }
 
-  parseDirectory(dirPath: string, extensions: string[] = ['.ts']): ParsedFile[] {
+  parseDirectory(dirPath: string, extensions: string[] = ['.ts'], showProgress: boolean = false): ParsedFile[] {
     const files = this.collectFiles(dirPath, extensions);
     const parsed: ParsedFile[] = [];
 
+    let count = 0;
     for (const filePath of files) {
       try {
         const result = this.parseFile(filePath);
         if (result) {
           parsed.push(result);
         }
+        count++;
+        if (showProgress && count % 100 === 0) {
+          process.stdout.write(`\r  Parsed ${count}/${files.length} files...`);
+        }
       } catch (err) {
         console.warn(`Failed to parse ${filePath}: ${err}`);
       }
+    }
+
+    if (showProgress) {
+      process.stdout.write(`\r  Parsed ${count}/${files.length} files.    \n`);
     }
 
     return parsed;
@@ -85,9 +94,6 @@ export class AngularParser {
   parseFile(filePath: string): ParsedFile | null {
     if (!fs.existsSync(filePath)) return null;
 
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const sourceFile = this.project.createSourceFile(filePath, content, { overwrite: true });
-
     const result: ParsedFile = {
       filePath,
       relativePath: path.relative(this.baseDir, filePath),
@@ -101,6 +107,19 @@ export class AngularParser {
       constructorInjections: [],
       templateRefs: [],
     };
+
+    // For non-TypeScript files, just return basic info without ts-morph parsing
+    if (!filePath.endsWith('.ts') && !filePath.endsWith('.tsx')) {
+      if (filePath.endsWith('.scss')) {
+        result.type = 'util'; // Style files
+      } else if (filePath.endsWith('.html')) {
+        result.type = 'unknown'; // Template files (parsed via component's templateUrl)
+      }
+      return result;
+    }
+
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const sourceFile = this.project.createSourceFile(filePath, content, { overwrite: true });
 
     // Parse ES imports
     result.imports = this.parseImports(sourceFile, filePath);
