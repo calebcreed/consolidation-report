@@ -317,10 +317,17 @@ ${this.escapeJsonForHtml(JSON.stringify(data))}
 
     let currentPage = 0;
     const PAGE_SIZE = 100;
+    const CHUNK_SIZE = 20; // Render this many items per frame
     let filteredNodes = [];
+    let renderAbort = null;
 
     function renderFileList(filter = 'all', search = '', resetPage = true) {
       const container = document.getElementById('file-list');
+
+      // Abort any in-progress render
+      if (renderAbort) renderAbort.abort = true;
+      const thisRender = { abort: false };
+      renderAbort = thisRender;
 
       if (resetPage) currentPage = 0;
 
@@ -338,39 +345,71 @@ ${this.escapeJsonForHtml(JSON.stringify(data))}
       const pageNodes = filteredNodes.slice(start, start + PAGE_SIZE);
       const totalPages = Math.ceil(filteredNodes.length / PAGE_SIZE);
 
-      // Build HTML efficiently
-      let html = '';
-      for (const node of pageNodes) {
-        html += renderFileItem(node);
+      // Show loading state with progress
+      container.innerHTML = '<div style="padding:20px;color:#8b949e;">Loading...</div>';
+
+      // Render in chunks to avoid blocking UI
+      let rendered = 0;
+      const fragment = document.createDocumentFragment();
+
+      function renderChunk() {
+        if (thisRender.abort) return;
+
+        const chunk = pageNodes.slice(rendered, rendered + CHUNK_SIZE);
+        for (const node of chunk) {
+          const div = document.createElement('div');
+          div.innerHTML = renderFileItem(node);
+          while (div.firstChild) fragment.appendChild(div.firstChild);
+        }
+        rendered += chunk.length;
+
+        if (rendered < pageNodes.length) {
+          // Update progress and yield to UI
+          container.innerHTML = '<div style="padding:20px;color:#8b949e;">Loading ' + rendered + '/' + pageNodes.length + '...</div>';
+          requestAnimationFrame(renderChunk);
+        } else {
+          // Done - finalize
+          finishRender();
+        }
       }
 
-      // Add pagination
-      if (totalPages > 1) {
-        html += \`<div style="padding:15px;text-align:center;border-top:1px solid #30363d;">
-          <span style="color:#8b949e;">Showing \${start + 1}-\${Math.min(start + PAGE_SIZE, filteredNodes.length)} of \${filteredNodes.length}</span>
-          <div style="margin-top:10px;">
-            \${currentPage > 0 ? '<button class="page-btn" data-dir="-1" style="margin-right:10px;padding:5px 15px;background:#238636;color:white;border:none;border-radius:4px;cursor:pointer;">Previous</button>' : ''}
-            \${currentPage < totalPages - 1 ? '<button class="page-btn" data-dir="1" style="padding:5px 15px;background:#238636;color:white;border:none;border-radius:4px;cursor:pointer;">Next</button>' : ''}
-          </div>
-        </div>\`;
-      }
+      function finishRender() {
+        if (thisRender.abort) return;
 
-      container.innerHTML = html;
+        container.innerHTML = '';
+        container.appendChild(fragment);
 
-      // Add click handlers
-      container.querySelectorAll('.file-item').forEach(item => {
-        item.addEventListener('click', () => item.classList.toggle('expanded'));
-      });
+        // Add pagination
+        if (totalPages > 1) {
+          const paginationDiv = document.createElement('div');
+          paginationDiv.style.cssText = 'padding:15px;text-align:center;border-top:1px solid #30363d;';
+          paginationDiv.innerHTML = \`
+            <span style="color:#8b949e;">Showing \${start + 1}-\${Math.min(start + PAGE_SIZE, filteredNodes.length)} of \${filteredNodes.length}</span>
+            <div style="margin-top:10px;">
+              \${currentPage > 0 ? '<button class="page-btn" data-dir="-1" style="margin-right:10px;padding:5px 15px;background:#238636;color:white;border:none;border-radius:4px;cursor:pointer;">Previous</button>' : ''}
+              \${currentPage < totalPages - 1 ? '<button class="page-btn" data-dir="1" style="padding:5px 15px;background:#238636;color:white;border:none;border-radius:4px;cursor:pointer;">Next</button>' : ''}
+            </div>
+          \`;
+          container.appendChild(paginationDiv);
+        }
 
-      container.querySelectorAll('.page-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          currentPage += parseInt(btn.dataset.dir);
-          const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;
-          const search = document.getElementById('file-search').value;
-          renderFileList(activeFilter, search, false);
-          container.scrollIntoView({ behavior: 'smooth' });
+        // Add click handlers
+        container.querySelectorAll('.file-item').forEach(item => {
+          item.addEventListener('click', () => item.classList.toggle('expanded'));
         });
-      });
+
+        container.querySelectorAll('.page-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            currentPage += parseInt(btn.dataset.dir);
+            const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;
+            const search = document.getElementById('file-search').value;
+            renderFileList(activeFilter, search, false);
+            container.scrollIntoView({ behavior: 'smooth' });
+          });
+        });
+      }
+
+      requestAnimationFrame(renderChunk);
     }
 
     function renderFileItem(node) {
@@ -666,15 +705,20 @@ ${this.escapeJsonForHtml(JSON.stringify(data))}
       setTimeout(() => simulation.stop(), 5000);
     }
 
-    // Initial render
+    // Initial render - staggered to keep UI responsive
     try {
       console.log('Rendering file list...');
       renderFileList();
-      console.log('Rendering movable list...');
-      renderMovableList();
-      console.log('Rendering conflict list...');
-      renderConflictList();
-      console.log('Initial render complete');
+      // Delay other renders to let file list start first
+      setTimeout(() => {
+        console.log('Rendering movable list...');
+        renderMovableList();
+      }, 100);
+      setTimeout(() => {
+        console.log('Rendering conflict list...');
+        renderConflictList();
+        console.log('Initial render complete');
+      }, 200);
     } catch (e) {
       console.error('Render error:', e);
       document.getElementById('file-list').innerHTML = '<div style="padding:20px;color:red;">Render error: ' + e.message + '</div>';
