@@ -11,6 +11,7 @@ interface ReportData {
   edges: DependencyEdge[];
   movableTrees: ReturnType<GraphAnalyzer['getMovableTrees']>;
   priorities: ReturnType<GraphAnalyzer['getConsolidationPriority']>;
+  bottlenecks: ReturnType<GraphAnalyzer['getBottlenecks']>;
 }
 
 export class ReportGenerator {
@@ -37,6 +38,9 @@ export class ReportGenerator {
   ): void {
     const movableTrees = this.analyzer.getMovableTrees(result);
     const priorities = this.analyzer.getConsolidationPriority(result);
+    const bottlenecks = this.analyzer.getBottlenecks(result);
+
+    console.log(`  Found ${bottlenecks.filter(b => b.unlockCount > 0).length} bottleneck nodes`);
 
     // Prepare node data with diffs for all non-clean files
     const nodesWithDiffs: ReportData['nodes'] = [];
@@ -84,6 +88,7 @@ export class ReportGenerator {
       edges,
       movableTrees,
       priorities,
+      bottlenecks,
     };
 
     console.log(`  Report data: ${nodesWithDiffs.length} nodes, ${edges.length} edges`);
@@ -222,6 +227,7 @@ export class ReportGenerator {
 
     <div class="tabs">
       <button class="tab active" data-tab="files">All Files</button>
+      <button class="tab" data-tab="bottlenecks">Bottlenecks</button>
       <button class="tab" data-tab="movable">Movable to Shared</button>
       <button class="tab" data-tab="conflicts">Conflicts</button>
       <button class="tab" data-tab="graph">Dependency Graph</button>
@@ -238,6 +244,12 @@ export class ReportGenerator {
         <button class="filter-btn" data-filter="CONFLICT">Conflicts</button>
       </div>
       <div class="file-list" id="file-list"></div>
+    </div>
+
+    <div id="bottlenecks" class="tab-content">
+      <h2>Bottleneck Analysis</h2>
+      <p class="meta">Nodes that, if resolved, would unlock the largest clean subtrees. Higher unlock count = more files become movable to shared.</p>
+      <div class="file-list" id="bottleneck-list"></div>
     </div>
 
     <div id="movable" class="tab-content">
@@ -554,6 +566,58 @@ ${this.escapeJsonForHtml(JSON.stringify(data))}
       requestAnimationFrame(renderChunk);
     }
 
+    function renderBottleneckList() {
+      const container = document.getElementById('bottleneck-list');
+
+      // Filter to only show bottlenecks that actually unlock something
+      const meaningful = DATA.bottlenecks.filter(b => b.unlockCount > 0);
+
+      if (meaningful.length === 0) {
+        container.innerHTML = '<div style="padding:20px;color:#8b949e;">No bottlenecks found - no single node is blocking a subtree alone.</div>';
+        return;
+      }
+
+      container.innerHTML = '<div style="padding:20px;color:#8b949e;">Loading ' + meaningful.length + ' bottlenecks...</div>';
+
+      // Chunked rendering
+      const CHUNK = 20;
+      let i = 0;
+      const fragment = document.createDocumentFragment();
+
+      function renderChunk() {
+        const chunk = meaningful.slice(i, i + CHUNK);
+        for (const b of chunk) {
+          const div = document.createElement('div');
+          div.className = 'tree-item';
+          div.style.borderLeft = '3px solid ' + (b.unlockCount > 10 ? '#3fb950' : b.unlockCount > 3 ? '#f0883e' : '#8b949e');
+          div.innerHTML = \`
+            <div class="tree-header">
+              <span class="file-path">\${b.relativePath}</span>
+              <span class="divergence-badge \${b.divergenceType}">\${b.divergenceType.replace('_', ' ')}</span>
+              <span class="divergence-badge CLEAN">Unlocks \${b.unlockCount} files</span>
+            </div>
+            <div style="font-size:12px;color:#8b949e;margin-top:8px;">
+              <strong>Changes:</strong> \${b.totalChanges} lines |
+              <strong>Impact Score:</strong> \${b.impactScore.toFixed(2)} (unlocks/line)
+            </div>
+            <div style="font-size:12px;color:#8b949e;margin-top:5px;">
+              <strong>Would unlock:</strong> \${b.unlockPaths.join(', ')}\${b.unlockCount > 5 ? '...' : ''}
+            </div>
+          \`;
+          fragment.appendChild(div);
+        }
+        i += chunk.length;
+
+        if (i < meaningful.length) {
+          requestAnimationFrame(renderChunk);
+        } else {
+          container.innerHTML = '';
+          container.appendChild(fragment);
+        }
+      }
+      requestAnimationFrame(renderChunk);
+    }
+
     let graphRendered = false;
 
     function renderGraph() {
@@ -714,16 +778,19 @@ ${this.escapeJsonForHtml(JSON.stringify(data))}
     try {
       console.log('Rendering file list...');
       renderFileList();
-      // Delay other renders to let file list start first
+      setTimeout(() => {
+        console.log('Rendering bottleneck list...');
+        renderBottleneckList();
+      }, 100);
       setTimeout(() => {
         console.log('Rendering movable list...');
         renderMovableList();
-      }, 100);
+      }, 200);
       setTimeout(() => {
         console.log('Rendering conflict list...');
         renderConflictList();
         console.log('Initial render complete');
-      }, 200);
+      }, 300);
     } catch (e) {
       console.error('Render error:', e);
       document.getElementById('file-list').innerHTML = '<div style="padding:20px;color:red;">Render error: ' + e.message + '</div>';

@@ -230,6 +230,128 @@ export class GraphAnalyzer {
       });
   }
 
+  /**
+   * Bottleneck Analysis: Find nodes that, if cleaned, would unlock the largest clean subtrees.
+   *
+   * For each non-clean node N, we calculate:
+   * - How many nodes have N as their ONLY blocking dependency
+   * - These are nodes that would become part of clean subtrees if N were resolved
+   *
+   * Related concepts: Dominator analysis, articulation points, influence maximization
+   */
+  getBottlenecks(result: AnalysisResult): Array<{
+    nodeId: string;
+    relativePath: string;
+    divergenceType: string;
+    unlockCount: number;        // Nodes that would be unlocked
+    unlockPaths: string[];      // Sample of paths that would be unlocked
+    totalChanges: number;       // Lines changed (effort estimate)
+    impactScore: number;        // unlockCount / totalChanges (bang for buck)
+  }> {
+    const nodes = result.nodes;
+
+    // Step 1: Find all non-clean nodes (blockers)
+    const blockers = new Set<string>();
+    for (const node of nodes.values()) {
+      const divType = node.divergence?.type;
+      if (divType && divType !== 'CLEAN' && divType !== 'SAME_CHANGE') {
+        blockers.add(node.id);
+      }
+    }
+
+    // Step 2: For each node, find all blocker ancestors (transitive)
+    const blockerAncestors = new Map<string, Set<string>>();
+
+    const getBlockerAncestors = (nodeId: string, visited: Set<string>): Set<string> => {
+      if (blockerAncestors.has(nodeId)) {
+        return blockerAncestors.get(nodeId)!;
+      }
+      if (visited.has(nodeId)) {
+        return new Set(); // Cycle
+      }
+
+      visited.add(nodeId);
+      const node = nodes.get(nodeId);
+      if (!node) return new Set();
+
+      const ancestors = new Set<string>();
+
+      // If this node itself is a blocker, add it
+      if (blockers.has(nodeId)) {
+        ancestors.add(nodeId);
+      }
+
+      // Add blocker ancestors from dependencies
+      for (const depId of node.dependencies) {
+        const depAncestors = getBlockerAncestors(depId, visited);
+        for (const a of depAncestors) {
+          ancestors.add(a);
+        }
+      }
+
+      blockerAncestors.set(nodeId, ancestors);
+      return ancestors;
+    };
+
+    for (const node of nodes.values()) {
+      getBlockerAncestors(node.id, new Set());
+    }
+
+    // Step 3: For each blocker, count nodes where it's the ONLY blocker
+    const unlockMap = new Map<string, string[]>(); // blocker -> nodes it solely blocks
+
+    for (const [nodeId, ancestors] of blockerAncestors.entries()) {
+      if (ancestors.size === 1) {
+        // This node has exactly one blocker - that blocker solely blocks this node
+        const [blockerId] = ancestors;
+        if (!unlockMap.has(blockerId)) {
+          unlockMap.set(blockerId, []);
+        }
+        unlockMap.get(blockerId)!.push(nodeId);
+      }
+    }
+
+    // Step 4: Build result with impact scores
+    const bottlenecks: Array<{
+      nodeId: string;
+      relativePath: string;
+      divergenceType: string;
+      unlockCount: number;
+      unlockPaths: string[];
+      totalChanges: number;
+      impactScore: number;
+    }> = [];
+
+    for (const blockerId of blockers) {
+      const node = nodes.get(blockerId);
+      if (!node) continue;
+
+      const unlocked = unlockMap.get(blockerId) || [];
+      const totalChanges = (node.divergence?.retailChanges.additions || 0) +
+                          (node.divergence?.retailChanges.deletions || 0) +
+                          (node.divergence?.restaurantChanges.additions || 0) +
+                          (node.divergence?.restaurantChanges.deletions || 0);
+
+      // Impact score: nodes unlocked per line of change (higher = better ROI)
+      const impactScore = totalChanges > 0 ? unlocked.length / totalChanges : unlocked.length;
+
+      bottlenecks.push({
+        nodeId: blockerId,
+        relativePath: node.relativePath,
+        divergenceType: node.divergence?.type || 'unknown',
+        unlockCount: unlocked.length,
+        unlockPaths: unlocked.slice(0, 5).map(id => nodes.get(id)?.relativePath || id),
+        totalChanges,
+        impactScore,
+      });
+    }
+
+    // Sort by unlock count descending (most impactful first)
+    bottlenecks.sort((a, b) => b.unlockCount - a.unlockCount);
+
+    return bottlenecks;
+  }
+
   getConsolidationPriority(result: AnalysisResult): Array<{
     nodeId: string;
     priority: 'high' | 'medium' | 'low';
