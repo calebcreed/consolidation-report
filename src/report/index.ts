@@ -38,37 +38,55 @@ export class ReportGenerator {
     const movableTrees = this.analyzer.getMovableTrees(result);
     const priorities = this.analyzer.getConsolidationPriority(result);
 
-    // Prepare node data with diffs (limit diff size to prevent huge HTML)
+    // Prepare node data - only include diffs for CONFLICT files to keep HTML size manageable
     const nodesWithDiffs: ReportData['nodes'] = [];
-    const MAX_DIFF_LINES = 200;
+    const MAX_DIFF_LINES = 100;
+    const MAX_DIFFS = 50; // Only embed diffs for first 50 conflict files
+    let diffCount = 0;
 
     for (const node of result.nodes.values()) {
-      const diffResult = diffResults.get(node.retailPath || node.restaurantPath || '');
       let diffs: { retail: string; restaurant: string } | undefined;
 
-      if (diffResult && node.divergence?.type !== 'CLEAN') {
-        const filename = node.relativePath;
-        let { retailDiff, restaurantDiff } = this.differ.generateUnifiedDiff(
-          diffResult.baseContent,
-          diffResult.retailContent,
-          diffResult.restaurantContent,
-          filename
-        );
+      // Only include diffs for conflict files, and limit total
+      if (node.divergence?.type === 'CONFLICT' && diffCount < MAX_DIFFS) {
+        const diffResult = diffResults.get(node.retailPath || node.restaurantPath || '');
+        if (diffResult) {
+          const filename = node.relativePath;
+          let { retailDiff, restaurantDiff } = this.differ.generateUnifiedDiff(
+            diffResult.baseContent,
+            diffResult.retailContent,
+            diffResult.restaurantContent,
+            filename
+          );
 
-        // Truncate large diffs
-        const truncate = (diff: string): string => {
-          const lines = diff.split('\n');
-          if (lines.length > MAX_DIFF_LINES) {
-            return lines.slice(0, MAX_DIFF_LINES).join('\n') + '\n... truncated (' + (lines.length - MAX_DIFF_LINES) + ' more lines)';
-          }
-          return diff;
-        };
+          // Truncate large diffs
+          const truncate = (diff: string): string => {
+            const lines = diff.split('\n');
+            if (lines.length > MAX_DIFF_LINES) {
+              return lines.slice(0, MAX_DIFF_LINES).join('\n') + '\n... truncated (' + (lines.length - MAX_DIFF_LINES) + ' more lines)';
+            }
+            return diff;
+          };
 
-        diffs = { retail: truncate(retailDiff), restaurant: truncate(restaurantDiff) };
+          diffs = { retail: truncate(retailDiff), restaurant: truncate(restaurantDiff) };
+          diffCount++;
+        }
       }
 
-      nodesWithDiffs.push({ ...node, diffs });
+      // Slim down node data - only include essential fields
+      nodesWithDiffs.push({
+        id: node.id,
+        relativePath: node.relativePath,
+        type: node.type,
+        divergence: node.divergence,
+        dependencies: node.dependencies.slice(0, 20), // Limit deps shown
+        dependents: node.dependents.slice(0, 20),
+        isCleanSubtree: node.isCleanSubtree,
+        diffs,
+      } as ReportData['nodes'][0]);
     }
+
+    console.log(`  Including diffs for ${diffCount} conflict files`);
 
     // Limit edges for large codebases
     const maxEdges = 1000;
