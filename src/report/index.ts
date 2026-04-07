@@ -38,69 +38,52 @@ export class ReportGenerator {
     const movableTrees = this.analyzer.getMovableTrees(result);
     const priorities = this.analyzer.getConsolidationPriority(result);
 
-    // Prepare node data - only include diffs for CONFLICT files to keep HTML size manageable
+    // Prepare node data with diffs for all non-clean files
     const nodesWithDiffs: ReportData['nodes'] = [];
-    const MAX_DIFF_LINES = 100;
-    const MAX_DIFFS = 50; // Only embed diffs for first 50 conflict files
-    let diffCount = 0;
+    const MAX_DIFF_LINES = 200;
 
     for (const node of result.nodes.values()) {
+      const diffResult = diffResults.get(node.retailPath || node.restaurantPath || '');
       let diffs: { retail: string; restaurant: string } | undefined;
 
-      // Only include diffs for conflict files, and limit total
-      if (node.divergence?.type === 'CONFLICT' && diffCount < MAX_DIFFS) {
-        const diffResult = diffResults.get(node.retailPath || node.restaurantPath || '');
-        if (diffResult) {
-          const filename = node.relativePath;
-          let { retailDiff, restaurantDiff } = this.differ.generateUnifiedDiff(
-            diffResult.baseContent,
-            diffResult.retailContent,
-            diffResult.restaurantContent,
-            filename
-          );
+      if (diffResult && node.divergence?.type !== 'CLEAN') {
+        const filename = node.relativePath;
+        let { retailDiff, restaurantDiff } = this.differ.generateUnifiedDiff(
+          diffResult.baseContent,
+          diffResult.retailContent,
+          diffResult.restaurantContent,
+          filename
+        );
 
-          // Truncate large diffs
-          const truncate = (diff: string): string => {
-            const lines = diff.split('\n');
-            if (lines.length > MAX_DIFF_LINES) {
-              return lines.slice(0, MAX_DIFF_LINES).join('\n') + '\n... truncated (' + (lines.length - MAX_DIFF_LINES) + ' more lines)';
-            }
-            return diff;
-          };
+        // Truncate very large diffs
+        const truncate = (diff: string): string => {
+          const lines = diff.split('\n');
+          if (lines.length > MAX_DIFF_LINES) {
+            return lines.slice(0, MAX_DIFF_LINES).join('\n') + '\n... truncated (' + (lines.length - MAX_DIFF_LINES) + ' more lines)';
+          }
+          return diff;
+        };
 
-          diffs = { retail: truncate(retailDiff), restaurant: truncate(restaurantDiff) };
-          diffCount++;
-        }
+        diffs = { retail: truncate(retailDiff), restaurant: truncate(restaurantDiff) };
       }
 
-      // Slim down node data - only include essential fields
       nodesWithDiffs.push({
-        id: node.id,
-        relativePath: node.relativePath,
-        type: node.type,
-        divergence: node.divergence,
-        dependencies: node.dependencies.slice(0, 20), // Limit deps shown
-        dependents: node.dependents.slice(0, 20),
-        isCleanSubtree: node.isCleanSubtree,
+        ...node,
         diffs,
       } as ReportData['nodes'][0]);
     }
 
-    console.log(`  Including diffs for ${diffCount} conflict files`);
+    console.log(`  Including ${nodesWithDiffs.filter(n => n.diffs).length} files with diffs`);
 
-    // Limit edges for large codebases
-    const maxEdges = 1000;
-    const edges = result.edges.length > maxEdges
-      ? result.edges.slice(0, maxEdges)
-      : result.edges;
+    const edges = result.edges;
 
     const reportData: ReportData = {
       generatedAt: new Date().toISOString(),
       stats: result.stats,
       nodes: nodesWithDiffs,
       edges,
-      movableTrees: movableTrees.slice(0, 50), // Limit movable trees
-      priorities: priorities.slice(0, 100), // Limit priorities
+      movableTrees,
+      priorities,
     };
 
     console.log(`  Report data: ${nodesWithDiffs.length} nodes, ${edges.length} edges`);
@@ -492,12 +475,19 @@ ${this.escapeJsonForHtml(JSON.stringify(data))}
         return;
       }
 
-      // Build HTML efficiently - limit to first 50 trees
-      const trees = DATA.movableTrees.slice(0, 50);
-      let html = '';
-      for (const tree of trees) {
-        html += \`
-          <div class="tree-item">
+      container.innerHTML = '<div style="padding:20px;color:#8b949e;">Loading ' + DATA.movableTrees.length + ' trees...</div>';
+
+      // Chunked rendering
+      const CHUNK = 20;
+      let i = 0;
+      const fragment = document.createDocumentFragment();
+
+      function renderChunk() {
+        const chunk = DATA.movableTrees.slice(i, i + CHUNK);
+        for (const tree of chunk) {
+          const div = document.createElement('div');
+          div.className = 'tree-item';
+          div.innerHTML = \`
             <div class="tree-header">
               <span class="file-path">\${tree.rootId}</span>
               <span class="divergence-badge CLEAN">\${tree.totalFiles} files</span>
@@ -505,13 +495,19 @@ ${this.escapeJsonForHtml(JSON.stringify(data))}
             <div class="tree-files">
               \${tree.files.slice(0, 10).join(', ')}\${tree.files.length > 10 ? '...' : ''}
             </div>
-          </div>
-        \`;
+          \`;
+          fragment.appendChild(div);
+        }
+        i += chunk.length;
+
+        if (i < DATA.movableTrees.length) {
+          requestAnimationFrame(renderChunk);
+        } else {
+          container.innerHTML = '';
+          container.appendChild(fragment);
+        }
       }
-      if (DATA.movableTrees.length > 50) {
-        html += '<div class="tree-item"><span style="color:#8b949e">... and ' + (DATA.movableTrees.length - 50) + ' more</span></div>';
-      }
-      container.innerHTML = html;
+      requestAnimationFrame(renderChunk);
     }
 
     function renderConflictList() {
@@ -524,20 +520,38 @@ ${this.escapeJsonForHtml(JSON.stringify(data))}
         return bTotal - aTotal;
       });
 
-      // Limit to first 100 conflicts
-      const limited = conflicts.slice(0, 100);
-      let html = '';
-      for (const node of limited) {
-        html += renderFileItem(node);
+      if (conflicts.length === 0) {
+        container.innerHTML = '<div style="padding:20px;color:#8b949e;">No conflicts found</div>';
+        return;
       }
-      if (conflicts.length > 100) {
-        html += '<div style="padding:15px;color:#8b949e;">... and ' + (conflicts.length - 100) + ' more conflicts. Use the All Files tab to see all.</div>';
-      }
-      container.innerHTML = html;
 
-      container.querySelectorAll('.file-item').forEach(item => {
-        item.addEventListener('click', () => item.classList.toggle('expanded'));
-      });
+      container.innerHTML = '<div style="padding:20px;color:#8b949e;">Loading ' + conflicts.length + ' conflicts...</div>';
+
+      // Chunked rendering
+      const CHUNK = 20;
+      let i = 0;
+      const fragment = document.createDocumentFragment();
+
+      function renderChunk() {
+        const chunk = conflicts.slice(i, i + CHUNK);
+        for (const node of chunk) {
+          const div = document.createElement('div');
+          div.innerHTML = renderFileItem(node);
+          while (div.firstChild) fragment.appendChild(div.firstChild);
+        }
+        i += chunk.length;
+
+        if (i < conflicts.length) {
+          requestAnimationFrame(renderChunk);
+        } else {
+          container.innerHTML = '';
+          container.appendChild(fragment);
+          container.querySelectorAll('.file-item').forEach(item => {
+            item.addEventListener('click', () => item.classList.toggle('expanded'));
+          });
+        }
+      }
+      requestAnimationFrame(renderChunk);
     }
 
     let graphRendered = false;
@@ -588,32 +602,23 @@ ${this.escapeJsonForHtml(JSON.stringify(data))}
         CONFLICT: '#f85149'
       };
 
-      // Prioritize conflict nodes, then limit total
-      const MAX_NODES = 200;
-      const MAX_EDGES = 400;
-
-      // Sort nodes: conflicts first, then by number of connections
-      const edgeCount = new Map();
+      // Use all nodes that have connections
+      const connectedIds = new Set();
       DATA.edges.forEach(e => {
-        edgeCount.set(e.from, (edgeCount.get(e.from) || 0) + 1);
-        edgeCount.set(e.to, (edgeCount.get(e.to) || 0) + 1);
+        connectedIds.add(e.from);
+        connectedIds.add(e.to);
       });
 
-      const sortedNodes = [...DATA.nodes].sort((a, b) => {
-        // Conflicts first
-        if (a.divergence?.type === 'CONFLICT' && b.divergence?.type !== 'CONFLICT') return -1;
-        if (b.divergence?.type === 'CONFLICT' && a.divergence?.type !== 'CONFLICT') return 1;
-        // Then by edge count
-        return (edgeCount.get(b.id) || 0) - (edgeCount.get(a.id) || 0);
-      });
+      const nodes = DATA.nodes
+        .filter(n => connectedIds.has(n.id))
+        .map(n => ({ ...n, id: n.id }));
 
-      const nodes = sortedNodes.slice(0, MAX_NODES).map(n => ({ ...n, id: n.id }));
       const nodeIds = new Set(nodes.map(n => n.id));
-
       const links = DATA.edges
         .filter(e => nodeIds.has(e.from) && nodeIds.has(e.to))
-        .slice(0, MAX_EDGES)
         .map(e => ({ source: e.from, target: e.to, type: e.type }));
+
+      console.log('Rendering graph with', nodes.length, 'nodes and', links.length, 'edges');
 
       if (nodes.length === 0) {
         container.innerHTML = '<div style="padding:20px;color:#8b949e;">No connected nodes to display.</div>';
