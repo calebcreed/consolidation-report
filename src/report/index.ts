@@ -424,9 +424,38 @@ export class ReportGenerator {
     let graphRendered = false;
 
     function renderGraph() {
-      if (graphRendered) return;
-      graphRendered = true;
+      const container = document.getElementById('graph-container');
 
+      if (!graphRendered) {
+        // Show button to start rendering
+        container.innerHTML = \`
+          <div style="padding:40px;text-align:center;">
+            <p style="color:#8b949e;margin-bottom:20px;">Graph has \${DATA.nodes.length} nodes and \${DATA.edges.length} edges.</p>
+            <button id="render-graph-btn" style="padding:10px 20px;background:#238636;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;">
+              Render Graph
+            </button>
+            <p style="color:#8b949e;margin-top:15px;font-size:12px;">Large graphs may take a moment to layout.</p>
+          </div>
+        \`;
+        document.getElementById('render-graph-btn').addEventListener('click', () => {
+          graphRendered = true;
+          actuallyRenderGraph();
+        });
+        return;
+      }
+    }
+
+    function actuallyRenderGraph() {
+      const container = document.getElementById('graph-container');
+      container.innerHTML = '<div style="padding:20px;color:#8b949e;">Rendering graph...</div>';
+
+      // Use setTimeout to let the UI update before heavy computation
+      setTimeout(() => {
+        doRenderGraph();
+      }, 50);
+    }
+
+    function doRenderGraph() {
       const container = document.getElementById('graph-container');
       const width = container.clientWidth || 1200;
       const height = 600;
