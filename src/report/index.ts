@@ -22,6 +22,14 @@ export class ReportGenerator {
     this.analyzer = new GraphAnalyzer();
   }
 
+  private escapeJsonForHtml(json: string): string {
+    // Escape sequences that would break HTML or script parsing
+    return json
+      .replace(/</g, '\\u003c')
+      .replace(/>/g, '\\u003e')
+      .replace(/&/g, '\\u0026');
+  }
+
   generate(
     result: AnalysisResult,
     diffResults: Map<string, ThreeWayDiffResult>,
@@ -249,8 +257,11 @@ export class ReportGenerator {
     </div>
   </div>
 
+  <script id="report-data" type="application/json">
+${this.escapeJsonForHtml(JSON.stringify(data))}
+  </script>
   <script>
-    const DATA = ${JSON.stringify(data, null, 2)};
+    const DATA = JSON.parse(document.getElementById('report-data').textContent);
 
     // Tab switching
     document.querySelectorAll('.tab').forEach(tab => {
