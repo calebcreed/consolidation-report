@@ -123,7 +123,7 @@ program
   .requiredOption('-f, --files <ids>', 'Comma-separated node IDs to migrate (or "all-clean" for all clean subtrees)')
   .option('--repo-root <path>', 'Git repository root (default: auto-detect)')
   .option('--dry-run', 'Show what would be done without making changes', false)
-  .option('--no-delete', 'Do not delete original files after migration', false)
+  .option('--no-delete', 'Do not delete original files after migration')
   .action(async (options) => {
     try {
       await runMigrate(options);
