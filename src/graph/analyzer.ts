@@ -92,32 +92,39 @@ export class GraphAnalyzer {
     // 1. Its own divergence is CLEAN or SAME_CHANGE
     // 2. ALL of its dependencies also have clean subtrees
 
-    // Process in reverse topological order (leaves first)
     const processed = new Set<string>();
-    const nodeList = Array.from(nodes.values());
+    const visiting = new Set<string>(); // Track nodes currently being visited (cycle detection)
 
-    // Sort by depth descending (deepest first)
-    nodeList.sort((a, b) => b.depth - a.depth);
-
-    for (const node of nodeList) {
-      this.markNodeCleanSubtree(node, nodes, processed);
+    for (const node of nodes.values()) {
+      this.markNodeCleanSubtree(node, nodes, processed, visiting);
     }
   }
 
   private markNodeCleanSubtree(
     node: FileNode,
     nodes: Map<string, FileNode>,
-    processed: Set<string>
+    processed: Set<string>,
+    visiting: Set<string>
   ): boolean {
+    // Already processed
     if (processed.has(node.id)) {
       return node.isCleanSubtree;
     }
+
+    // Cycle detected - treat as not clean to break the cycle
+    if (visiting.has(node.id)) {
+      return false;
+    }
+
+    // Mark as visiting before recursing
+    visiting.add(node.id);
 
     // Check if this node itself is clean
     const selfClean = node.divergence?.type === 'CLEAN' || node.divergence?.type === 'SAME_CHANGE';
 
     if (!selfClean) {
       node.isCleanSubtree = false;
+      visiting.delete(node.id);
       processed.add(node.id);
       return false;
     }
@@ -127,15 +134,17 @@ export class GraphAnalyzer {
       const dep = nodes.get(depId);
       if (!dep) continue;
 
-      const depClean = this.markNodeCleanSubtree(dep, nodes, processed);
+      const depClean = this.markNodeCleanSubtree(dep, nodes, processed, visiting);
       if (!depClean) {
         node.isCleanSubtree = false;
+        visiting.delete(node.id);
         processed.add(node.id);
         return false;
       }
     }
 
     node.isCleanSubtree = true;
+    visiting.delete(node.id);
     processed.add(node.id);
     return true;
   }
