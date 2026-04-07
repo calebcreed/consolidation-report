@@ -289,29 +289,60 @@ ${this.escapeJsonForHtml(JSON.stringify(data))}
       renderFileList(activeFilter, e.target.value);
     });
 
-    function renderFileList(filter = 'all', search = '') {
-      const container = document.getElementById('file-list');
-      container.innerHTML = '';
+    let currentPage = 0;
+    const PAGE_SIZE = 100;
+    let filteredNodes = [];
 
-      let nodes = DATA.nodes;
+    function renderFileList(filter = 'all', search = '', resetPage = true) {
+      const container = document.getElementById('file-list');
+
+      if (resetPage) currentPage = 0;
+
+      filteredNodes = DATA.nodes;
       if (filter !== 'all') {
-        nodes = nodes.filter(n => n.divergence?.type === filter);
+        filteredNodes = filteredNodes.filter(n => n.divergence?.type === filter);
       }
       if (search) {
         const lower = search.toLowerCase();
-        nodes = nodes.filter(n => n.relativePath.toLowerCase().includes(lower));
+        filteredNodes = filteredNodes.filter(n => n.relativePath.toLowerCase().includes(lower));
+      }
+      filteredNodes.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+
+      const start = currentPage * PAGE_SIZE;
+      const pageNodes = filteredNodes.slice(start, start + PAGE_SIZE);
+      const totalPages = Math.ceil(filteredNodes.length / PAGE_SIZE);
+
+      // Build HTML efficiently
+      let html = '';
+      for (const node of pageNodes) {
+        html += renderFileItem(node);
       }
 
-      nodes.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
-
-      for (const node of nodes) {
-        container.innerHTML += renderFileItem(node);
+      // Add pagination
+      if (totalPages > 1) {
+        html += \`<div style="padding:15px;text-align:center;border-top:1px solid #30363d;">
+          <span style="color:#8b949e;">Showing \${start + 1}-\${Math.min(start + PAGE_SIZE, filteredNodes.length)} of \${filteredNodes.length}</span>
+          <div style="margin-top:10px;">
+            \${currentPage > 0 ? '<button class="page-btn" data-dir="-1" style="margin-right:10px;padding:5px 15px;background:#238636;color:white;border:none;border-radius:4px;cursor:pointer;">Previous</button>' : ''}
+            \${currentPage < totalPages - 1 ? '<button class="page-btn" data-dir="1" style="padding:5px 15px;background:#238636;color:white;border:none;border-radius:4px;cursor:pointer;">Next</button>' : ''}
+          </div>
+        </div>\`;
       }
+
+      container.innerHTML = html;
 
       // Add click handlers
       container.querySelectorAll('.file-item').forEach(item => {
-        item.addEventListener('click', () => {
-          item.classList.toggle('expanded');
+        item.addEventListener('click', () => item.classList.toggle('expanded'));
+      });
+
+      container.querySelectorAll('.page-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          currentPage += parseInt(btn.dataset.dir);
+          const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;
+          const search = document.getElementById('file-search').value;
+          renderFileList(activeFilter, search, false);
+          container.scrollIntoView({ behavior: 'smooth' });
         });
       });
     }
@@ -480,20 +511,31 @@ ${this.escapeJsonForHtml(JSON.stringify(data))}
         CONFLICT: '#f85149'
       };
 
-      // Build node and link data for D3
-      const nodeMap = new Map(DATA.nodes.map(n => [n.id, n]));
-      const connectedIds = new Set();
-      DATA.edges.forEach(e => { connectedIds.add(e.from); connectedIds.add(e.to); });
+      // Prioritize conflict nodes, then limit total
+      const MAX_NODES = 200;
+      const MAX_EDGES = 400;
 
-      // Only show connected nodes, limit to 500 for performance
-      const nodes = DATA.nodes
-        .filter(n => connectedIds.has(n.id))
-        .slice(0, 500)
-        .map(n => ({ ...n, id: n.id }));
+      // Sort nodes: conflicts first, then by number of connections
+      const edgeCount = new Map();
+      DATA.edges.forEach(e => {
+        edgeCount.set(e.from, (edgeCount.get(e.from) || 0) + 1);
+        edgeCount.set(e.to, (edgeCount.get(e.to) || 0) + 1);
+      });
 
+      const sortedNodes = [...DATA.nodes].sort((a, b) => {
+        // Conflicts first
+        if (a.divergence?.type === 'CONFLICT' && b.divergence?.type !== 'CONFLICT') return -1;
+        if (b.divergence?.type === 'CONFLICT' && a.divergence?.type !== 'CONFLICT') return 1;
+        // Then by edge count
+        return (edgeCount.get(b.id) || 0) - (edgeCount.get(a.id) || 0);
+      });
+
+      const nodes = sortedNodes.slice(0, MAX_NODES).map(n => ({ ...n, id: n.id }));
       const nodeIds = new Set(nodes.map(n => n.id));
+
       const links = DATA.edges
         .filter(e => nodeIds.has(e.from) && nodeIds.has(e.to))
+        .slice(0, MAX_EDGES)
         .map(e => ({ source: e.from, target: e.to, type: e.type }));
 
       if (nodes.length === 0) {
