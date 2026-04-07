@@ -30,35 +30,54 @@ export class ReportGenerator {
     const movableTrees = this.analyzer.getMovableTrees(result);
     const priorities = this.analyzer.getConsolidationPriority(result);
 
-    // Prepare node data with diffs
+    // Prepare node data with diffs (limit diff size to prevent huge HTML)
     const nodesWithDiffs: ReportData['nodes'] = [];
+    const MAX_DIFF_LINES = 200;
 
     for (const node of result.nodes.values()) {
       const diffResult = diffResults.get(node.retailPath || node.restaurantPath || '');
       let diffs: { retail: string; restaurant: string } | undefined;
 
-      if (diffResult) {
+      if (diffResult && node.divergence?.type !== 'CLEAN') {
         const filename = node.relativePath;
-        const { retailDiff, restaurantDiff } = this.differ.generateUnifiedDiff(
+        let { retailDiff, restaurantDiff } = this.differ.generateUnifiedDiff(
           diffResult.baseContent,
           diffResult.retailContent,
           diffResult.restaurantContent,
           filename
         );
-        diffs = { retail: retailDiff, restaurant: restaurantDiff };
+
+        // Truncate large diffs
+        const truncate = (diff: string): string => {
+          const lines = diff.split('\n');
+          if (lines.length > MAX_DIFF_LINES) {
+            return lines.slice(0, MAX_DIFF_LINES).join('\n') + '\n... truncated (' + (lines.length - MAX_DIFF_LINES) + ' more lines)';
+          }
+          return diff;
+        };
+
+        diffs = { retail: truncate(retailDiff), restaurant: truncate(restaurantDiff) };
       }
 
       nodesWithDiffs.push({ ...node, diffs });
     }
 
+    // Limit edges for large codebases
+    const maxEdges = 1000;
+    const edges = result.edges.length > maxEdges
+      ? result.edges.slice(0, maxEdges)
+      : result.edges;
+
     const reportData: ReportData = {
       generatedAt: new Date().toISOString(),
       stats: result.stats,
       nodes: nodesWithDiffs,
-      edges: result.edges,
-      movableTrees,
-      priorities,
+      edges,
+      movableTrees: movableTrees.slice(0, 50), // Limit movable trees
+      priorities: priorities.slice(0, 100), // Limit priorities
     };
+
+    console.log(`  Report data: ${nodesWithDiffs.length} nodes, ${edges.length} edges`);
 
     const html = this.generateHtml(reportData);
     fs.writeFileSync(outputPath, html);
@@ -72,6 +91,7 @@ export class ReportGenerator {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WebPOS Consolidation Report</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; }
@@ -401,27 +421,15 @@ export class ReportGenerator {
       });
     }
 
+    let graphRendered = false;
+
     function renderGraph() {
+      if (graphRendered) return;
+      graphRendered = true;
+
       const container = document.getElementById('graph-container');
-      container.innerHTML = '<div style="padding:20px;color:#8b949e;">Graph visualization requires D3.js. For a large codebase, consider using the JSON export with an external graph tool.</div>';
-
-      // Simple SVG graph for smaller datasets
-      if (DATA.nodes.length < 200) {
-        renderSimpleGraph(container);
-      }
-    }
-
-    function renderSimpleGraph(container) {
-      const width = container.clientWidth;
+      const width = container.clientWidth || 1200;
       const height = 600;
-
-      const nodeMap = new Map(DATA.nodes.map(n => [n.id, n]));
-      const links = DATA.edges.map(e => ({ source: e.from, target: e.to, type: e.type }));
-
-      // Filter to nodes that have edges
-      const connectedIds = new Set();
-      links.forEach(l => { connectedIds.add(l.source); connectedIds.add(l.target); });
-      const nodes = DATA.nodes.filter(n => connectedIds.has(n.id)).slice(0, 100);
 
       // Color by divergence
       const colors = {
@@ -432,49 +440,110 @@ export class ReportGenerator {
         CONFLICT: '#f85149'
       };
 
-      let svg = \`<svg width="\${width}" height="\${height}" style="background:#161b22">
-        <defs>
-          <marker id="arrow" viewBox="0 0 10 10" refX="20" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="#30363d"/>
-          </marker>
-        </defs>\`;
+      // Build node and link data for D3
+      const nodeMap = new Map(DATA.nodes.map(n => [n.id, n]));
+      const connectedIds = new Set();
+      DATA.edges.forEach(e => { connectedIds.add(e.from); connectedIds.add(e.to); });
 
-      // Simple force-directed layout simulation
-      const nodePositions = new Map();
-      nodes.forEach((n, i) => {
-        const angle = (i / nodes.length) * 2 * Math.PI;
-        const radius = Math.min(width, height) * 0.35;
-        nodePositions.set(n.id, {
-          x: width/2 + Math.cos(angle) * radius,
-          y: height/2 + Math.sin(angle) * radius
-        });
-      });
+      // Only show connected nodes, limit to 500 for performance
+      const nodes = DATA.nodes
+        .filter(n => connectedIds.has(n.id))
+        .slice(0, 500)
+        .map(n => ({ ...n, id: n.id }));
 
-      // Draw edges
-      const validLinks = links.filter(l => nodePositions.has(l.source) && nodePositions.has(l.target));
-      validLinks.forEach(link => {
-        const source = nodePositions.get(link.source);
-        const target = nodePositions.get(link.target);
-        if (source && target) {
-          svg += \`<line x1="\${source.x}" y1="\${source.y}" x2="\${target.x}" y2="\${target.y}" stroke="#30363d" stroke-width="1" marker-end="url(#arrow)"/>\`;
-        }
-      });
+      const nodeIds = new Set(nodes.map(n => n.id));
+      const links = DATA.edges
+        .filter(e => nodeIds.has(e.from) && nodeIds.has(e.to))
+        .map(e => ({ source: e.from, target: e.to, type: e.type }));
+
+      if (nodes.length === 0) {
+        container.innerHTML = '<div style="padding:20px;color:#8b949e;">No connected nodes to display.</div>';
+        return;
+      }
+
+      // Clear and create SVG
+      container.innerHTML = '';
+      const svg = d3.select(container)
+        .append('svg')
+        .attr('width', width)
+        .attr('height', height)
+        .style('background', '#161b22');
+
+      // Add zoom behavior
+      const g = svg.append('g');
+      svg.call(d3.zoom()
+        .scaleExtent([0.1, 4])
+        .on('zoom', (event) => g.attr('transform', event.transform)));
+
+      // Create force simulation
+      const simulation = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links).id(d => d.id).distance(80))
+        .force('charge', d3.forceManyBody().strength(-200))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide().radius(30));
+
+      // Draw links
+      const link = g.append('g')
+        .selectAll('line')
+        .data(links)
+        .enter().append('line')
+        .attr('stroke', '#30363d')
+        .attr('stroke-width', 1)
+        .attr('stroke-opacity', 0.6);
 
       // Draw nodes
-      nodes.forEach(node => {
-        const pos = nodePositions.get(node.id);
-        if (pos) {
-          const color = colors[node.divergence?.type] || '#8b949e';
-          const label = node.relativePath.split('/').pop().substring(0, 15);
-          svg += \`<circle cx="\${pos.x}" cy="\${pos.y}" r="8" fill="\${color}" style="cursor:pointer">
-            <title>\${node.relativePath}</title>
-          </circle>\`;
-          svg += \`<text x="\${pos.x}" y="\${pos.y + 20}" text-anchor="middle" fill="#8b949e" font-size="9">\${label}</text>\`;
-        }
-      });
+      const node = g.append('g')
+        .selectAll('circle')
+        .data(nodes)
+        .enter().append('circle')
+        .attr('r', 6)
+        .attr('fill', d => colors[d.divergence?.type] || '#8b949e')
+        .attr('stroke', '#0d1117')
+        .attr('stroke-width', 1)
+        .style('cursor', 'pointer')
+        .call(d3.drag()
+          .on('start', (event, d) => {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x; d.fy = d.y;
+          })
+          .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+          .on('end', (event, d) => {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null; d.fy = null;
+          }));
 
-      svg += '</svg>';
-      container.innerHTML = svg;
+      // Add tooltips
+      node.append('title').text(d => d.relativePath + ' (' + (d.divergence?.type || 'unknown') + ')');
+
+      // Add labels (only for smaller graphs)
+      if (nodes.length < 100) {
+        const labels = g.append('g')
+          .selectAll('text')
+          .data(nodes)
+          .enter().append('text')
+          .text(d => d.relativePath.split('/').pop().substring(0, 12))
+          .attr('font-size', 8)
+          .attr('fill', '#8b949e')
+          .attr('text-anchor', 'middle')
+          .attr('dy', 15);
+
+        simulation.on('tick', () => {
+          link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+              .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+          node.attr('cx', d => d.x).attr('cy', d => d.y);
+          labels.attr('x', d => d.x).attr('y', d => d.y);
+        });
+      } else {
+        simulation.on('tick', () => {
+          link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+              .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+          node.attr('cx', d => d.x).attr('cy', d => d.y);
+        });
+      }
+
+      // Stop simulation after settling
+      simulation.alpha(1).restart();
+      setTimeout(() => simulation.stop(), 5000);
     }
 
     // Initial render
