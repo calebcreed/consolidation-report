@@ -104,6 +104,7 @@ program
   .requiredOption('-r, --retail <path>', 'Path to retail app directory')
   .requiredOption('-t, --restaurant <path>', 'Path to restaurant app directory')
   .option('-s, --shared <path>', 'Path to shared directory', './shared')
+  .option('--repo-root <path>', 'Git repository root (default: auto-detect)')
   .action(async (options) => {
     try {
       await runMigrateList(options);
@@ -120,7 +121,9 @@ program
   .requiredOption('-t, --restaurant <path>', 'Path to restaurant app directory')
   .requiredOption('-s, --shared <path>', 'Path to shared directory')
   .requiredOption('-f, --files <ids>', 'Comma-separated node IDs to migrate (or "all-clean" for all clean subtrees)')
+  .option('--repo-root <path>', 'Git repository root (default: auto-detect)')
   .option('--dry-run', 'Show what would be done without making changes', false)
+  .option('--no-delete', 'Do not delete original files after migration', false)
   .action(async (options) => {
     try {
       await runMigrate(options);
@@ -134,25 +137,70 @@ async function runMigrateList(options: {
   retail: string;
   restaurant: string;
   shared: string;
+  repoRoot?: string;
 }) {
   const retailPath = path.resolve(options.retail);
   const restaurantPath = path.resolve(options.restaurant);
   const sharedPath = path.resolve(options.shared);
+  const repoRoot = options.repoRoot ? path.resolve(options.repoRoot) : findGitRoot(retailPath);
 
-  console.log('Building dependency graph...');
+  console.log('Analyzing codebase for movable subtrees...');
+  console.log(`Repo root: ${repoRoot}\n`);
 
+  // Step 1: Parse files
+  console.log('Parsing files...');
   const retailParser = new AngularParser(retailPath);
   const restaurantParser = new AngularParser(restaurantPath);
 
   const retailFiles = retailParser.parseDirectory(retailPath, ['.ts', '.tsx', '.scss', '.html']);
   const restaurantFiles = restaurantParser.parseDirectory(restaurantPath, ['.ts', '.tsx', '.scss', '.html']);
 
+  console.log(`  Retail: ${retailFiles.length} files`);
+  console.log(`  Restaurant: ${restaurantFiles.length} files`);
+
+  // Step 2: Match files
+  console.log('Matching files...');
   const matcher = new FileMatcher(retailPath, restaurantPath);
   const matchResult = matcher.match(retailFiles, restaurantFiles);
 
-  // Build graph (we don't need diffs for migration planning)
+  console.log(`  Matched: ${matchResult.matched.length}`);
+  console.log(`  Retail only: ${matchResult.retailOnly.length}`);
+  console.log(`  Restaurant only: ${matchResult.restaurantOnly.length}`);
+
+  // Step 3: Compute diffs (required to determine CLEAN vs CONFLICT)
+  console.log('Computing diffs...');
+  const differ = new GitDiffer(repoRoot, null);
+  const diffResults = new Map<string, ThreeWayDiffResult>();
+
+  let processed = 0;
+  const total = matchResult.matched.length + matchResult.retailOnly.length + matchResult.restaurantOnly.length;
+
+  for (const match of matchResult.matched) {
+    const result = differ.computeThreeWayDiff(match.retailFile, match.restaurantFile);
+    diffResults.set(match.retailFile, result);
+    processed++;
+    if (processed % 100 === 0) {
+      process.stdout.write(`\r  Processed ${processed}/${total}...`);
+    }
+  }
+
+  for (const filePath of matchResult.retailOnly) {
+    const result = differ.computeThreeWayDiff(filePath, null);
+    diffResults.set(filePath, result);
+    processed++;
+  }
+
+  for (const filePath of matchResult.restaurantOnly) {
+    const result = differ.computeThreeWayDiff(null, filePath);
+    diffResults.set(filePath, result);
+    processed++;
+  }
+  console.log(`\r  Computed ${diffResults.size} diffs`);
+
+  // Step 4: Build graph with diff results
+  console.log('Building dependency graph...');
   const config: Config = {
-    repoRoot: retailPath,
+    repoRoot,
     retailPath,
     restaurantPath,
     sharedPath,
@@ -168,12 +216,19 @@ async function runMigrateList(options: {
     matchResult.matched,
     matchResult.retailOnly,
     matchResult.restaurantOnly,
-    new Map() // Empty diff results - not needed for migration
+    diffResults
   );
 
-  // Analyze
+  // Step 5: Analyze
   const analyzer = new GraphAnalyzer();
-  analyzer.analyze(nodes, edges);
+  const result = analyzer.analyze(nodes, edges);
+
+  console.log(`\nDivergence summary:`);
+  console.log(`  Clean:           ${result.stats.cleanFiles}`);
+  console.log(`  Same change:     ${result.stats.sameChangeFiles}`);
+  console.log(`  Retail only:     ${result.stats.retailOnlyFiles}`);
+  console.log(`  Restaurant only: ${result.stats.restaurantOnlyFiles}`);
+  console.log(`  Conflicts:       ${result.stats.conflictFiles}`);
 
   // Get movable subtrees
   const migrator = new Migrator(retailPath, restaurantPath, sharedPath, nodes, edges);
@@ -220,33 +275,61 @@ async function runMigrate(options: {
   restaurant: string;
   shared: string;
   files: string;
+  repoRoot?: string;
   dryRun: boolean;
+  delete: boolean;
 }) {
   const retailPath = path.resolve(options.retail);
   const restaurantPath = path.resolve(options.restaurant);
   const sharedPath = path.resolve(options.shared);
+  const repoRoot = options.repoRoot ? path.resolve(options.repoRoot) : findGitRoot(retailPath);
+  const deleteOriginals = options.delete !== false; // --no-delete sets delete to false
 
   console.log('Migration Tool');
   console.log('==============');
-  console.log(`Retail:     ${retailPath}`);
-  console.log(`Restaurant: ${restaurantPath}`);
-  console.log(`Shared:     ${sharedPath}`);
-  console.log(`Dry run:    ${options.dryRun}`);
+  console.log(`Retail:           ${retailPath}`);
+  console.log(`Restaurant:       ${restaurantPath}`);
+  console.log(`Shared:           ${sharedPath}`);
+  console.log(`Repo root:        ${repoRoot}`);
+  console.log(`Dry run:          ${options.dryRun}`);
+  console.log(`Delete originals: ${deleteOriginals}`);
   console.log('');
 
-  console.log('Building dependency graph...');
-
+  // Step 1: Parse files
+  console.log('Parsing files...');
   const retailParser = new AngularParser(retailPath);
   const restaurantParser = new AngularParser(restaurantPath);
 
   const retailFiles = retailParser.parseDirectory(retailPath, ['.ts', '.tsx', '.scss', '.html']);
   const restaurantFiles = restaurantParser.parseDirectory(restaurantPath, ['.ts', '.tsx', '.scss', '.html']);
 
+  // Step 2: Match files
+  console.log('Matching files...');
   const matcher = new FileMatcher(retailPath, restaurantPath);
   const matchResult = matcher.match(retailFiles, restaurantFiles);
 
+  // Step 3: Compute diffs
+  console.log('Computing diffs...');
+  const differ = new GitDiffer(repoRoot, null);
+  const diffResults = new Map<string, ThreeWayDiffResult>();
+
+  for (const match of matchResult.matched) {
+    const result = differ.computeThreeWayDiff(match.retailFile, match.restaurantFile);
+    diffResults.set(match.retailFile, result);
+  }
+  for (const filePath of matchResult.retailOnly) {
+    const result = differ.computeThreeWayDiff(filePath, null);
+    diffResults.set(filePath, result);
+  }
+  for (const filePath of matchResult.restaurantOnly) {
+    const result = differ.computeThreeWayDiff(null, filePath);
+    diffResults.set(filePath, result);
+  }
+
+  // Step 4: Build graph
+  console.log('Building dependency graph...');
   const config: Config = {
-    repoRoot: retailPath,
+    repoRoot,
     retailPath,
     restaurantPath,
     sharedPath,
@@ -262,9 +345,10 @@ async function runMigrate(options: {
     matchResult.matched,
     matchResult.retailOnly,
     matchResult.restaurantOnly,
-    new Map()
+    diffResults
   );
 
+  // Step 5: Analyze
   const analyzer = new GraphAnalyzer();
   analyzer.analyze(nodes, edges);
 
@@ -299,9 +383,11 @@ async function runMigrate(options: {
   const plan = migrator.planMigration(nodeIds);
 
   console.log(`\nMigration Plan:`);
-  console.log(`  Files to move:    ${plan.stats.filesToMove}`);
-  console.log(`  Files to update:  ${plan.stats.filesToUpdate}`);
-  console.log(`  Imports to fix:   ${plan.stats.importsToRewrite}`);
+  console.log(`  Files to move:      ${plan.stats.filesToMove}`);
+  console.log(`  Files to update:    ${plan.stats.filesToUpdate}`);
+  console.log(`  Imports to fix:     ${plan.stats.importsToRewrite}`);
+  console.log(`  Barrel updates:     ${plan.stats.barrelUpdates}`);
+  console.log(`  Files to delete:    ${plan.stats.filesToDelete}`);
 
   if (plan.warnings.length > 0) {
     console.log(`\nWarnings:`);
@@ -312,7 +398,7 @@ async function runMigrate(options: {
 
   // Execute
   console.log('');
-  const result = migrator.executeMigration(plan, options.dryRun);
+  const result = migrator.executeMigration(plan, options.dryRun, deleteOriginals);
 
   if (result.errors.length > 0) {
     console.log('\nErrors:');

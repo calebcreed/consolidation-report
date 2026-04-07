@@ -8,6 +8,7 @@ export interface MigrationFile {
   targetPath: string;        // New path in shared folder
   sourceRelative: string;    // Relative from source root
   targetRelative: string;    // Relative from shared root
+  associatedFiles?: string[]; // Related files (template, styles)
 }
 
 export interface ImportUpdate {
@@ -17,14 +18,24 @@ export interface ImportUpdate {
   line: number;              // Line number (approximate)
 }
 
+export interface BarrelUpdate {
+  barrelPath: string;        // index.ts path
+  exportToAdd: string;       // New export statement
+  exportToRemove: string;    // Old export to remove (if any)
+}
+
 export interface MigrationPlan {
   files: MigrationFile[];
   importUpdates: ImportUpdate[];
+  barrelUpdates: BarrelUpdate[];
+  filesToDelete: string[];   // Original files to delete after migration
   warnings: string[];
   stats: {
     filesToMove: number;
     filesToUpdate: number;
     importsToRewrite: number;
+    barrelUpdates: number;
+    filesToDelete: number;
   };
 }
 
@@ -56,6 +67,8 @@ export class Migrator {
     const warnings: string[] = [];
     const filesToMove: MigrationFile[] = [];
     const importUpdates: ImportUpdate[] = [];
+    const barrelUpdates: BarrelUpdate[] = [];
+    const filesToDelete: string[] = [];
 
     // Expand to include all dependencies (topological order)
     const allNodeIds = this.expandWithDependencies(nodeIds);
@@ -86,13 +99,36 @@ export class Migrator {
       const targetRelative = sourceRelative;
       const targetPath = path.join(this.sharedPath, targetRelative);
 
+      // Find associated files (template, styles, spec)
+      const associatedFiles = this.findAssociatedFiles(sourcePath);
+
       filesToMove.push({
         nodeId,
         sourcePath,
         targetPath,
         sourceRelative,
         targetRelative,
+        associatedFiles,
       });
+
+      // Track files to delete (source files in both branches)
+      filesToDelete.push(sourcePath);
+      if (node.retailPath && node.retailPath !== sourcePath) {
+        filesToDelete.push(node.retailPath);
+      }
+      if (node.restaurantPath && node.restaurantPath !== sourcePath) {
+        filesToDelete.push(node.restaurantPath);
+      }
+      // Also delete associated files from both branches
+      for (const assoc of associatedFiles) {
+        filesToDelete.push(assoc);
+        // Find corresponding file in other branch
+        const otherBranch = sourceBase === this.retailPath ? this.restaurantPath : this.retailPath;
+        const otherPath = path.join(otherBranch, path.relative(sourceBase, assoc));
+        if (fs.existsSync(otherPath)) {
+          filesToDelete.push(otherPath);
+        }
+      }
     }
 
     // Build a map of old path -> new path for import rewriting
@@ -108,6 +144,10 @@ export class Migrator {
         pathMapping.set(node.restaurantPath, file.targetPath);
       }
     }
+
+    // Find barrel files (index.ts) that export moved files
+    const barrelFiles = this.findAffectedBarrelFiles(filesToMove, pathMapping);
+    barrelUpdates.push(...barrelFiles);
 
     // Find all files that need import updates
     const filesToUpdate = new Set<string>();
@@ -141,16 +181,101 @@ export class Migrator {
       importUpdates.push(...updates);
     }
 
+    // Count total files including associated
+    let totalFilesToMove = filesToMove.length;
+    for (const f of filesToMove) {
+      totalFilesToMove += (f.associatedFiles?.length || 0);
+    }
+
     return {
       files: filesToMove,
       importUpdates,
+      barrelUpdates,
+      filesToDelete: [...new Set(filesToDelete)], // Dedupe
       warnings,
       stats: {
-        filesToMove: filesToMove.length,
+        filesToMove: totalFilesToMove,
         filesToUpdate: filesToUpdate.size,
         importsToRewrite: importUpdates.length,
+        barrelUpdates: barrelUpdates.length,
+        filesToDelete: filesToDelete.length,
       },
     };
+  }
+
+  /**
+   * Find associated files for a TypeScript file (template, styles, spec)
+   */
+  private findAssociatedFiles(tsFilePath: string): string[] {
+    const associated: string[] = [];
+    const dir = path.dirname(tsFilePath);
+    const baseName = path.basename(tsFilePath, path.extname(tsFilePath));
+
+    // Common associated file patterns
+    const patterns = [
+      `${baseName}.html`,
+      `${baseName}.scss`,
+      `${baseName}.css`,
+      `${baseName}.less`,
+      `${baseName}.spec.ts`,
+      `${baseName}.test.ts`,
+    ];
+
+    for (const pattern of patterns) {
+      const filePath = path.join(dir, pattern);
+      if (fs.existsSync(filePath)) {
+        associated.push(filePath);
+      }
+    }
+
+    return associated;
+  }
+
+  /**
+   * Find barrel files (index.ts) that re-export moved files
+   */
+  private findAffectedBarrelFiles(
+    filesToMove: MigrationFile[],
+    pathMapping: Map<string, string>
+  ): BarrelUpdate[] {
+    const updates: BarrelUpdate[] = [];
+    const processedBarrels = new Set<string>();
+
+    for (const file of filesToMove) {
+      // Check for index.ts in the same directory and parent directories
+      let dir = path.dirname(file.sourcePath);
+      const sourceBase = file.sourcePath.startsWith(this.retailPath) ? this.retailPath : this.restaurantPath;
+
+      while (dir.startsWith(sourceBase) && dir !== sourceBase) {
+        const barrelPath = path.join(dir, 'index.ts');
+
+        if (fs.existsSync(barrelPath) && !processedBarrels.has(barrelPath)) {
+          processedBarrels.add(barrelPath);
+
+          const content = fs.readFileSync(barrelPath, 'utf-8');
+
+          // Check if this barrel exports the moved file
+          const relativePath = './' + path.relative(dir, file.sourcePath).replace(/\\/g, '/').replace(/\.ts$/, '');
+
+          if (content.includes(relativePath)) {
+            // Calculate new export path from shared barrel location
+            const barrelRelative = path.relative(sourceBase, barrelPath);
+            const newBarrelPath = path.join(this.sharedPath, barrelRelative);
+            const newRelativePath = './' + path.relative(path.dirname(newBarrelPath), file.targetPath).replace(/\\/g, '/').replace(/\.ts$/, '');
+
+            updates.push({
+              barrelPath,
+              exportToRemove: relativePath,
+              exportToAdd: newRelativePath,
+            });
+          }
+        }
+
+        dir = path.dirname(dir);
+      }
+    }
+
+    return updates;
   }
 
   /**
@@ -299,17 +424,22 @@ export class Migrator {
   /**
    * Execute a migration plan
    */
-  executeMigration(plan: MigrationPlan, dryRun: boolean = false): { success: boolean; errors: string[] } {
+  executeMigration(
+    plan: MigrationPlan,
+    dryRun: boolean = false,
+    deleteOriginals: boolean = true
+  ): { success: boolean; errors: string[] } {
     const errors: string[] = [];
 
     if (dryRun) {
       console.log('\n=== DRY RUN - No changes will be made ===\n');
     }
 
-    // Step 1: Create directories and copy files
-    console.log(`Moving ${plan.files.length} files to shared...`);
+    // Step 1: Create directories and copy files (including associated files)
+    console.log(`\nStep 1: Copying ${plan.stats.filesToMove} files to shared...`);
     for (const file of plan.files) {
       const targetDir = path.dirname(file.targetPath);
+      const sourceBase = file.sourcePath.startsWith(this.retailPath) ? this.retailPath : this.restaurantPath;
 
       if (!dryRun) {
         // Create target directory
@@ -317,7 +447,7 @@ export class Migrator {
           fs.mkdirSync(targetDir, { recursive: true });
         }
 
-        // Copy file
+        // Copy main file
         try {
           fs.copyFileSync(file.sourcePath, file.targetPath);
           console.log(`  ✓ ${file.sourceRelative}`);
@@ -325,13 +455,36 @@ export class Migrator {
           errors.push(`Failed to copy ${file.sourcePath}: ${err}`);
           console.log(`  ✗ ${file.sourceRelative}: ${err}`);
         }
+
+        // Copy associated files (template, styles, spec)
+        for (const assocPath of file.associatedFiles || []) {
+          const assocRelative = path.relative(sourceBase, assocPath);
+          const assocTarget = path.join(this.sharedPath, assocRelative);
+          const assocTargetDir = path.dirname(assocTarget);
+
+          if (!fs.existsSync(assocTargetDir)) {
+            fs.mkdirSync(assocTargetDir, { recursive: true });
+          }
+
+          try {
+            fs.copyFileSync(assocPath, assocTarget);
+            console.log(`  ✓ ${assocRelative} (associated)`);
+          } catch (err) {
+            errors.push(`Failed to copy ${assocPath}: ${err}`);
+            console.log(`  ✗ ${assocRelative}: ${err}`);
+          }
+        }
       } else {
         console.log(`  [would copy] ${file.sourceRelative} -> shared/${file.targetRelative}`);
+        for (const assocPath of file.associatedFiles || []) {
+          const assocRelative = path.relative(sourceBase, assocPath);
+          console.log(`  [would copy] ${assocRelative} (associated)`);
+        }
       }
     }
 
     // Step 2: Update imports in all affected files
-    console.log(`\nUpdating imports in ${plan.stats.filesToUpdate} files...`);
+    console.log(`\nStep 2: Updating imports in ${plan.stats.filesToUpdate} files...`);
 
     // Group updates by file
     const updatesByFile = new Map<string, ImportUpdate[]>();
@@ -361,7 +514,7 @@ export class Migrator {
           }
 
           fs.writeFileSync(effectivePath, content);
-          console.log(`  ✓ ${path.relative(this.sharedPath, effectivePath) || path.basename(effectivePath)} (${updates.length} imports)`);
+          console.log(`  ✓ ${path.relative(this.sharedPath, effectivePath) || path.relative(this.retailPath, effectivePath) || path.basename(effectivePath)} (${updates.length} imports)`);
         } catch (err) {
           errors.push(`Failed to update ${effectivePath}: ${err}`);
           console.log(`  ✗ ${effectivePath}: ${err}`);
@@ -373,6 +526,60 @@ export class Migrator {
         }
         if (updates.length > 3) {
           console.log(`    ... and ${updates.length - 3} more`);
+        }
+      }
+    }
+
+    // Step 3: Update barrel files (index.ts re-exports)
+    if (plan.barrelUpdates.length > 0) {
+      console.log(`\nStep 3: Updating ${plan.barrelUpdates.length} barrel files...`);
+      for (const barrel of plan.barrelUpdates) {
+        if (!dryRun) {
+          try {
+            let content = fs.readFileSync(barrel.barrelPath, 'utf-8');
+
+            // Replace old export with new
+            const oldExportPattern = new RegExp(
+              `(export\\s+.*?from\\s+['"])${this.escapeRegex(barrel.exportToRemove)}(['"])`,
+              'g'
+            );
+            content = content.replace(oldExportPattern, `$1${barrel.exportToAdd}$2`);
+
+            fs.writeFileSync(barrel.barrelPath, content);
+            console.log(`  ✓ ${path.basename(barrel.barrelPath)}`);
+          } catch (err) {
+            errors.push(`Failed to update barrel ${barrel.barrelPath}: ${err}`);
+            console.log(`  ✗ ${barrel.barrelPath}: ${err}`);
+          }
+        } else {
+          console.log(`  [would update] ${path.basename(barrel.barrelPath)}`);
+          console.log(`    ${barrel.exportToRemove} -> ${barrel.exportToAdd}`);
+        }
+      }
+    }
+
+    // Step 4: Delete original files
+    if (deleteOriginals && plan.filesToDelete.length > 0) {
+      console.log(`\nStep 4: Deleting ${plan.filesToDelete.length} original files...`);
+      for (const filePath of plan.filesToDelete) {
+        if (!fs.existsSync(filePath)) continue;
+
+        if (!dryRun) {
+          try {
+            fs.unlinkSync(filePath);
+            const rel = filePath.startsWith(this.retailPath)
+              ? path.relative(this.retailPath, filePath)
+              : path.relative(this.restaurantPath, filePath);
+            console.log(`  ✓ deleted ${rel}`);
+          } catch (err) {
+            errors.push(`Failed to delete ${filePath}: ${err}`);
+            console.log(`  ✗ ${filePath}: ${err}`);
+          }
+        } else {
+          const rel = filePath.startsWith(this.retailPath)
+            ? `retail/${path.relative(this.retailPath, filePath)}`
+            : `restaurant/${path.relative(this.restaurantPath, filePath)}`;
+          console.log(`  [would delete] ${rel}`);
         }
       }
     }
