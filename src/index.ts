@@ -10,6 +10,7 @@ import { GitDiffer, ThreeWayDiffResult } from './diff';
 import { GraphBuilder, GraphAnalyzer } from './graph';
 import { ReportGenerator } from './report';
 import { Validator } from './validator';
+import { Migrator } from './migrator';
 
 const program = new Command();
 
@@ -96,6 +97,238 @@ program
       process.exit(1);
     }
   });
+
+program
+  .command('migrate-list')
+  .description('List subtrees that can be migrated to shared')
+  .requiredOption('-r, --retail <path>', 'Path to retail app directory')
+  .requiredOption('-t, --restaurant <path>', 'Path to restaurant app directory')
+  .option('-s, --shared <path>', 'Path to shared directory', './shared')
+  .action(async (options) => {
+    try {
+      await runMigrateList(options);
+    } catch (err) {
+      console.error('Error:', err);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('migrate')
+  .description('Migrate files/subtrees to shared folder')
+  .requiredOption('-r, --retail <path>', 'Path to retail app directory')
+  .requiredOption('-t, --restaurant <path>', 'Path to restaurant app directory')
+  .requiredOption('-s, --shared <path>', 'Path to shared directory')
+  .requiredOption('-f, --files <ids>', 'Comma-separated node IDs to migrate (or "all-clean" for all clean subtrees)')
+  .option('--dry-run', 'Show what would be done without making changes', false)
+  .action(async (options) => {
+    try {
+      await runMigrate(options);
+    } catch (err) {
+      console.error('Error:', err);
+      process.exit(1);
+    }
+  });
+
+async function runMigrateList(options: {
+  retail: string;
+  restaurant: string;
+  shared: string;
+}) {
+  const retailPath = path.resolve(options.retail);
+  const restaurantPath = path.resolve(options.restaurant);
+  const sharedPath = path.resolve(options.shared);
+
+  console.log('Building dependency graph...');
+
+  const retailParser = new AngularParser(retailPath);
+  const restaurantParser = new AngularParser(restaurantPath);
+
+  const retailFiles = retailParser.parseDirectory(retailPath, ['.ts', '.tsx', '.scss', '.html']);
+  const restaurantFiles = restaurantParser.parseDirectory(restaurantPath, ['.ts', '.tsx', '.scss', '.html']);
+
+  const matcher = new FileMatcher(retailPath, restaurantPath);
+  const matchResult = matcher.match(retailFiles, restaurantFiles);
+
+  // Build graph (we don't need diffs for migration planning)
+  const config: Config = {
+    repoRoot: retailPath,
+    retailPath,
+    restaurantPath,
+    sharedPath,
+    baseCommit: null,
+    outputPath: '',
+    fileExtensions: ['.ts'],
+  };
+
+  const graphBuilder = new GraphBuilder(config);
+  const { nodes, edges } = graphBuilder.build(
+    retailFiles,
+    restaurantFiles,
+    matchResult.matched,
+    matchResult.retailOnly,
+    matchResult.restaurantOnly,
+    new Map() // Empty diff results - not needed for migration
+  );
+
+  // Analyze
+  const analyzer = new GraphAnalyzer();
+  analyzer.analyze(nodes, edges);
+
+  // Get movable subtrees
+  const migrator = new Migrator(retailPath, restaurantPath, sharedPath, nodes, edges);
+  const movable = migrator.getMovableSubtrees();
+
+  console.log('\nMovable Subtrees (Clean):');
+  console.log('=========================\n');
+
+  if (movable.length === 0) {
+    console.log('No clean subtrees found that can be moved to shared.');
+    console.log('You may need to resolve some conflicts first.');
+    return;
+  }
+
+  let totalFiles = 0;
+  for (const tree of movable.slice(0, 50)) {
+    console.log(`${tree.rootId}`);
+    console.log(`  Files: ${tree.totalFiles}`);
+    if (tree.nodeIds.length <= 5) {
+      for (const id of tree.nodeIds) {
+        console.log(`    - ${id}`);
+      }
+    } else {
+      for (const id of tree.nodeIds.slice(0, 3)) {
+        console.log(`    - ${id}`);
+      }
+      console.log(`    ... and ${tree.nodeIds.length - 3} more`);
+    }
+    console.log('');
+    totalFiles += tree.totalFiles;
+  }
+
+  console.log('---');
+  console.log(`Total movable subtrees: ${movable.length}`);
+  console.log(`Total files: ${totalFiles}`);
+  console.log('\nTo migrate, run:');
+  console.log(`  node dist/index.js migrate -r ${options.retail} -t ${options.restaurant} -s ${options.shared} -f <node-id> --dry-run`);
+  console.log('\nOr migrate all clean subtrees:');
+  console.log(`  node dist/index.js migrate -r ${options.retail} -t ${options.restaurant} -s ${options.shared} -f all-clean --dry-run`);
+}
+
+async function runMigrate(options: {
+  retail: string;
+  restaurant: string;
+  shared: string;
+  files: string;
+  dryRun: boolean;
+}) {
+  const retailPath = path.resolve(options.retail);
+  const restaurantPath = path.resolve(options.restaurant);
+  const sharedPath = path.resolve(options.shared);
+
+  console.log('Migration Tool');
+  console.log('==============');
+  console.log(`Retail:     ${retailPath}`);
+  console.log(`Restaurant: ${restaurantPath}`);
+  console.log(`Shared:     ${sharedPath}`);
+  console.log(`Dry run:    ${options.dryRun}`);
+  console.log('');
+
+  console.log('Building dependency graph...');
+
+  const retailParser = new AngularParser(retailPath);
+  const restaurantParser = new AngularParser(restaurantPath);
+
+  const retailFiles = retailParser.parseDirectory(retailPath, ['.ts', '.tsx', '.scss', '.html']);
+  const restaurantFiles = restaurantParser.parseDirectory(restaurantPath, ['.ts', '.tsx', '.scss', '.html']);
+
+  const matcher = new FileMatcher(retailPath, restaurantPath);
+  const matchResult = matcher.match(retailFiles, restaurantFiles);
+
+  const config: Config = {
+    repoRoot: retailPath,
+    retailPath,
+    restaurantPath,
+    sharedPath,
+    baseCommit: null,
+    outputPath: '',
+    fileExtensions: ['.ts'],
+  };
+
+  const graphBuilder = new GraphBuilder(config);
+  const { nodes, edges } = graphBuilder.build(
+    retailFiles,
+    restaurantFiles,
+    matchResult.matched,
+    matchResult.retailOnly,
+    matchResult.restaurantOnly,
+    new Map()
+  );
+
+  const analyzer = new GraphAnalyzer();
+  analyzer.analyze(nodes, edges);
+
+  const migrator = new Migrator(retailPath, restaurantPath, sharedPath, nodes, edges);
+
+  // Determine which files to migrate
+  let nodeIds: string[];
+
+  if (options.files === 'all-clean') {
+    // Get all clean subtrees
+    const movable = migrator.getMovableSubtrees();
+    nodeIds = [];
+    for (const tree of movable) {
+      nodeIds.push(...tree.nodeIds);
+    }
+    // Deduplicate
+    nodeIds = [...new Set(nodeIds)];
+    console.log(`Selected all clean subtrees: ${nodeIds.length} files`);
+  } else {
+    // Parse comma-separated node IDs
+    nodeIds = options.files.split(',').map(s => s.trim());
+    console.log(`Selected ${nodeIds.length} nodes`);
+  }
+
+  if (nodeIds.length === 0) {
+    console.log('No files selected for migration.');
+    return;
+  }
+
+  // Plan migration
+  console.log('\nPlanning migration...');
+  const plan = migrator.planMigration(nodeIds);
+
+  console.log(`\nMigration Plan:`);
+  console.log(`  Files to move:    ${plan.stats.filesToMove}`);
+  console.log(`  Files to update:  ${plan.stats.filesToUpdate}`);
+  console.log(`  Imports to fix:   ${plan.stats.importsToRewrite}`);
+
+  if (plan.warnings.length > 0) {
+    console.log(`\nWarnings:`);
+    for (const warn of plan.warnings) {
+      console.log(`  ⚠ ${warn}`);
+    }
+  }
+
+  // Execute
+  console.log('');
+  const result = migrator.executeMigration(plan, options.dryRun);
+
+  if (result.errors.length > 0) {
+    console.log('\nErrors:');
+    for (const err of result.errors) {
+      console.log(`  ✗ ${err}`);
+    }
+  }
+
+  if (options.dryRun) {
+    console.log('\n=== DRY RUN COMPLETE ===');
+    console.log('Run without --dry-run to apply changes.');
+  } else {
+    console.log('\n=== MIGRATION COMPLETE ===');
+    console.log(`Moved ${plan.stats.filesToMove} files to ${sharedPath}`);
+  }
+}
 
 async function runValidation(options: {
   retail: string;
