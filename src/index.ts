@@ -83,6 +83,20 @@ program
     }
   });
 
+program
+  .command('debug-match')
+  .description('Debug file matching - show detailed breakdown')
+  .requiredOption('-r, --retail <path>', 'Path to retail app directory')
+  .requiredOption('-t, --restaurant <path>', 'Path to restaurant app directory')
+  .action(async (options) => {
+    try {
+      await runDebugMatch(options);
+    } catch (err) {
+      console.error('Error:', err);
+      process.exit(1);
+    }
+  });
+
 async function runValidation(options: {
   retail: string;
   restaurant: string;
@@ -226,6 +240,24 @@ async function runAnalysis(options: {
   console.log(`  Matched: ${matchResult.matched.length} files`);
   console.log(`  Retail only: ${matchResult.retailOnly.length} files`);
   console.log(`  Restaurant only: ${matchResult.restaurantOnly.length} files`);
+
+  // Diagnostic: verify counts add up
+  const expectedRetail = matchResult.matched.length + matchResult.retailOnly.length;
+  const expectedRestaurant = matchResult.matched.length + matchResult.restaurantOnly.length;
+  if (expectedRetail !== retailFiles.length) {
+    console.warn(`  WARNING: Matcher missing ${retailFiles.length - expectedRetail} retail files`);
+  }
+  if (expectedRestaurant !== restaurantFiles.length) {
+    console.warn(`  WARNING: Matcher missing ${restaurantFiles.length - expectedRestaurant} restaurant files`);
+  }
+
+  // Show sample of restaurant-only files for verification
+  if (matchResult.restaurantOnly.length > 0 && matchResult.restaurantOnly.length <= 20) {
+    console.log(`  Restaurant-only files:`);
+    for (const f of matchResult.restaurantOnly) {
+      console.log(`    - ${path.relative(restaurantPath, f)}`);
+    }
+  }
 
   // Diagnostic check - verify matcher accounts for all parsed files
   const matcherRetailTotal = matchResult.matched.length + matchResult.retailOnly.length;
@@ -399,6 +431,114 @@ async function runStats(options: {
   console.log(`  Conflicts:          ${conflict}`);
   console.log(`Retail only files:    ${matchResult.retailOnly.length}`);
   console.log(`Restaurant only:      ${matchResult.restaurantOnly.length}`);
+}
+
+async function runDebugMatch(options: {
+  retail: string;
+  restaurant: string;
+}) {
+  const retailPath = path.resolve(options.retail);
+  const restaurantPath = path.resolve(options.restaurant);
+
+  console.log('Debug: File Matching Analysis');
+  console.log('=============================\n');
+
+  // Parse files
+  console.log('Parsing files...');
+  const retailParser = new AngularParser(retailPath);
+  const restaurantParser = new AngularParser(restaurantPath);
+
+  const retailFiles = retailParser.parseDirectory(retailPath, ['.ts', '.tsx', '.scss', '.html']);
+  const restaurantFiles = restaurantParser.parseDirectory(restaurantPath, ['.ts', '.tsx', '.scss', '.html']);
+
+  console.log(`Retail files:     ${retailFiles.length}`);
+  console.log(`Restaurant files: ${restaurantFiles.length}\n`);
+
+  // Match files
+  const matcher = new FileMatcher(retailPath, restaurantPath);
+  const matchResult = matcher.match(retailFiles, restaurantFiles);
+
+  // Breakdown by match method
+  const byMethod: Record<string, number> = {};
+  for (const m of matchResult.matched) {
+    byMethod[m.matchMethod] = (byMethod[m.matchMethod] || 0) + 1;
+  }
+
+  console.log('Match Methods:');
+  for (const [method, count] of Object.entries(byMethod)) {
+    console.log(`  ${method}: ${count}`);
+  }
+  console.log('');
+
+  // Verify counts
+  const accountedRetail = matchResult.matched.length + matchResult.retailOnly.length;
+  const accountedRestaurant = matchResult.matched.length + matchResult.restaurantOnly.length;
+
+  console.log('Verification:');
+  console.log(`  Matched pairs:        ${matchResult.matched.length}`);
+  console.log(`  Retail only:          ${matchResult.retailOnly.length}`);
+  console.log(`  Restaurant only:      ${matchResult.restaurantOnly.length}`);
+  console.log(`  Accounted retail:     ${accountedRetail} / ${retailFiles.length} ${accountedRetail === retailFiles.length ? '✓' : '✗ MISMATCH'}`);
+  console.log(`  Accounted restaurant: ${accountedRestaurant} / ${restaurantFiles.length} ${accountedRestaurant === restaurantFiles.length ? '✓' : '✗ MISMATCH'}`);
+  console.log('');
+
+  // Show restaurant-only files
+  console.log(`Restaurant-only files (${matchResult.restaurantOnly.length}):`);
+  for (const f of matchResult.restaurantOnly.slice(0, 30)) {
+    console.log(`  - ${path.relative(restaurantPath, f)}`);
+  }
+  if (matchResult.restaurantOnly.length > 30) {
+    console.log(`  ... and ${matchResult.restaurantOnly.length - 30} more`);
+  }
+  console.log('');
+
+  // Check for suspicious matches - restaurant files matched to very different retail paths
+  console.log('Checking for potentially incorrect matches...');
+  let suspicious = 0;
+  for (const m of matchResult.matched) {
+    const retailRel = path.relative(retailPath, m.retailFile);
+    const restRel = path.relative(restaurantPath, m.restaurantFile!);
+
+    // If matched by classname/selector but paths are very different
+    if (m.matchMethod !== 'path') {
+      const retailParts = retailRel.split(path.sep);
+      const restParts = restRel.split(path.sep);
+
+      // Check if they're in completely different directories
+      if (retailParts[0] !== restParts[0] && retailParts.length > 2) {
+        if (suspicious < 20) {
+          console.log(`  ${m.matchMethod}: ${retailRel} <-> ${restRel}`);
+        }
+        suspicious++;
+      }
+    }
+  }
+  if (suspicious === 0) {
+    console.log('  None found');
+  } else if (suspicious > 20) {
+    console.log(`  ... and ${suspicious - 20} more potentially suspicious matches`);
+  }
+  console.log('');
+
+  // Show files by extension breakdown
+  const retailByExt: Record<string, number> = {};
+  const restByExt: Record<string, number> = {};
+
+  for (const f of retailFiles) {
+    const ext = path.extname(f.filePath);
+    retailByExt[ext] = (retailByExt[ext] || 0) + 1;
+  }
+  for (const f of restaurantFiles) {
+    const ext = path.extname(f.filePath);
+    restByExt[ext] = (restByExt[ext] || 0) + 1;
+  }
+
+  console.log('Files by extension:');
+  console.log('  Extension    Retail    Restaurant');
+  const allExts = new Set([...Object.keys(retailByExt), ...Object.keys(restByExt)]);
+  for (const ext of [...allExts].sort()) {
+    console.log(`  ${ext.padEnd(12)} ${String(retailByExt[ext] || 0).padStart(6)}    ${String(restByExt[ext] || 0).padStart(6)}`);
+  }
 }
 
 function findGitRoot(startPath: string): string {
