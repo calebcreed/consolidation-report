@@ -378,34 +378,6 @@ async function runMigrateList(options: {
   console.log(`  Restaurant only: ${result.stats.restaurantOnlyFiles}`);
   console.log(`  Conflicts:       ${result.stats.conflictFiles}`);
 
-  // Count nodes with unresolved imports
-  let nodesWithUnresolved = 0;
-  let totalUnresolved = 0;
-  const sampleUnresolved: Array<{file: string, imports: string[]}> = [];
-  for (const node of nodes.values()) {
-    if (node.unresolvedImports && node.unresolvedImports.length > 0) {
-      nodesWithUnresolved++;
-      totalUnresolved += node.unresolvedImports.length;
-      if (sampleUnresolved.length < 5) {
-        sampleUnresolved.push({
-          file: node.relativePath,
-          imports: node.unresolvedImports.slice(0, 3)
-        });
-      }
-    }
-  }
-  if (nodesWithUnresolved > 0) {
-    console.log(`\n  Files with unresolved imports: ${nodesWithUnresolved} (${totalUnresolved} total imports)`);
-    console.log(`  (These are blocked from clean subtree migration)`);
-    console.log(`  Sample unresolved:`);
-    for (const sample of sampleUnresolved) {
-      console.log(`    ${sample.file}:`);
-      for (const imp of sample.imports) {
-        console.log(`      -> ${imp}`);
-      }
-    }
-  }
-
   // Get movable subtrees
   const migrator = new Migrator(retailPath, restaurantPath, sharedPath, nodes, edges);
   const movable = migrator.getMovableSubtrees();
@@ -642,6 +614,41 @@ async function runMigrate(options: {
   } else {
     console.log('\n=== MIGRATION COMPLETE ===');
     console.log(`Moved ${plan.stats.filesToMove} files to ${sharedPath}`);
+  }
+
+  // Show unresolved imports summary at the end
+  let nodesWithUnresolved = 0;
+  let totalUnresolved = 0;
+  const sampleUnresolved: Array<{file: string, imports: string[]}> = [];
+  for (const node of nodes.values()) {
+    if (node.unresolvedImports && node.unresolvedImports.length > 0) {
+      nodesWithUnresolved++;
+      totalUnresolved += node.unresolvedImports.length;
+      if (sampleUnresolved.length < 5) {
+        sampleUnresolved.push({
+          file: node.relativePath,
+          imports: node.unresolvedImports.slice(0, 3)
+        });
+      }
+    }
+  }
+
+  if (nodesWithUnresolved > 0) {
+    console.log(`\n========================================`);
+    console.log(`UNRESOLVED IMPORTS: ${nodesWithUnresolved} files (${totalUnresolved} imports)`);
+    console.log(`These files were BLOCKED from migration.`);
+    console.log(`========================================`);
+    for (const sample of sampleUnresolved) {
+      console.log(`  ${sample.file}:`);
+      for (const imp of sample.imports) {
+        console.log(`    -> ${imp}`);
+      }
+    }
+    if (nodesWithUnresolved > 5) {
+      console.log(`  ... and ${nodesWithUnresolved - 5} more files`);
+    }
+  } else {
+    console.log(`\nAll imports resolved successfully.`);
   }
 }
 
