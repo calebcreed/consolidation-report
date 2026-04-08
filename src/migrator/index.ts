@@ -286,16 +286,17 @@ export class Migrator {
     }
 
     // Build a map of old path -> new path for import rewriting
+    // IMPORTANT: Normalize all paths to ensure consistent lookups
     const pathMapping = new Map<string, string>();
     for (const file of filesToMove) {
-      pathMapping.set(file.sourcePath, file.targetPath);
+      pathMapping.set(path.normalize(file.sourcePath), file.targetPath);
       // Also map the other branch's path if it exists
       const node = this.nodes.get(file.nodeId);
       if (node?.retailPath && node.retailPath !== file.sourcePath) {
-        pathMapping.set(node.retailPath, file.targetPath);
+        pathMapping.set(path.normalize(node.retailPath), file.targetPath);
       }
       if (node?.restaurantPath && node.restaurantPath !== file.sourcePath) {
-        pathMapping.set(node.restaurantPath, file.targetPath);
+        pathMapping.set(path.normalize(node.restaurantPath), file.targetPath);
       }
     }
 
@@ -477,10 +478,20 @@ export class Migrator {
           const relativePath = './' + path.relative(dir, file.sourcePath).replace(/\\/g, '/').replace(/\.ts$/, '');
 
           if (content.includes(relativePath)) {
-            // Calculate new export path from shared barrel location
-            const barrelRelative = path.relative(sourceBase, barrelPath);
-            const newBarrelPath = path.join(this.sharedPath, barrelRelative);
-            const newRelativePath = './' + path.relative(path.dirname(newBarrelPath), file.targetPath).replace(/\\/g, '/').replace(/\.ts$/, '');
+            // Check if the barrel file is also being moved to shared
+            const normalizedBarrelPath = path.normalize(barrelPath);
+            const barrelIsBeingMoved = pathMapping.has(normalizedBarrelPath);
+
+            let newRelativePath: string;
+            if (barrelIsBeingMoved) {
+              // Barrel is also moving to shared - calculate relative within shared
+              const barrelRelative = path.relative(sourceBase, barrelPath);
+              const newBarrelPath = path.join(this.sharedPath, barrelRelative);
+              newRelativePath = './' + path.relative(path.dirname(newBarrelPath), file.targetPath).replace(/\\/g, '/').replace(/\.ts$/, '');
+            } else {
+              // Barrel stays in place - calculate path from barrel's current location to shared
+              newRelativePath = './' + path.relative(path.dirname(barrelPath), file.targetPath).replace(/\\/g, '/').replace(/\.ts$/, '');
+            }
 
             updates.push({
               barrelPath,
@@ -575,12 +586,18 @@ export class Migrator {
     const content = fs.readFileSync(filePath, 'utf-8');
 
     // Determine where this file will be after migration
-    const movedFile = filesToMove.find(f => f.sourcePath === filePath);
+    // Check both sourcePath and the node's retail/restaurant paths since we might be
+    // processing the restaurant version when sourcePath is the retail version
+    const movedFile = filesToMove.find(f => {
+      if (f.sourcePath === filePath) return true;
+      const node = this.nodes.get(f.nodeId);
+      return node?.retailPath === filePath || node?.restaurantPath === filePath;
+    });
     const effectiveFilePath = movedFile ? movedFile.targetPath : filePath;
     const isBeingMoved = !!movedFile;
 
-    // Find import statements
-    const importRegex = /^(import\s+.*?from\s+['"])([^'"]+)(['"])/gm;
+    // Find import AND export statements (export for barrel files like: export * from './foo')
+    const importRegex = /^((?:import|export)\s+.*?from\s+['"])([^'"]+)(['"])/gm;
     let match;
 
     while ((match = importRegex.exec(content)) !== null) {
@@ -611,8 +628,14 @@ export class Migrator {
 
       if (!resolvedImport) continue;
 
+      // Normalize the resolved path for consistent matching (pathMapping keys are also normalized)
+      const normalizedResolved = path.normalize(resolvedImport);
+
+      // Check if the resolved import is in pathMapping
+      const targetInMapping = pathMapping.get(normalizedResolved);
+
       // Check if this file is being moved but the import target is NOT being moved
-      if (isBeingMoved && !pathMapping.has(resolvedImport)) {
+      if (isBeingMoved && !targetInMapping) {
         // The imported file stays in place - need to update path to point back
         const newDir = path.dirname(effectiveFilePath);
         let newImport = path.relative(newDir, resolvedImport);
@@ -640,8 +663,8 @@ export class Migrator {
         continue;
       }
 
-      // Check if this import needs to be rewritten
-      const newTargetPath = pathMapping.get(resolvedImport);
+      // Check if this import needs to be rewritten (use normalized path for lookup)
+      const newTargetPath = pathMapping.get(normalizedResolved);
       if (newTargetPath) {
         // Calculate new relative import from effective file location
         const newDir = path.dirname(effectiveFilePath);
