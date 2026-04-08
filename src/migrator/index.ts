@@ -52,6 +52,7 @@ export class Migrator {
   private edges: DependencyEdge[];
   private pathAliases: PathAlias[] = [];
   private tsconfigBaseDir: string = '';
+  private verbose: boolean = false;
 
   constructor(
     retailPath: string,
@@ -59,13 +60,15 @@ export class Migrator {
     sharedPath: string,
     nodes: Map<string, FileNode>,
     edges: DependencyEdge[],
-    tsconfigPath?: string
+    tsconfigPath?: string,
+    verbose: boolean = false
   ) {
     this.retailPath = retailPath;
     this.restaurantPath = restaurantPath;
     this.sharedPath = sharedPath;
     this.nodes = nodes;
     this.edges = edges;
+    this.verbose = verbose;
 
     if (tsconfigPath) {
       this.loadTsConfig(tsconfigPath);
@@ -288,15 +291,33 @@ export class Migrator {
     // Build a map of old path -> new path for import rewriting
     // IMPORTANT: Normalize all paths to ensure consistent lookups
     const pathMapping = new Map<string, string>();
+    if (this.verbose) {
+      console.log('\n[VERBOSE] Building pathMapping:');
+    }
     for (const file of filesToMove) {
-      pathMapping.set(path.normalize(file.sourcePath), file.targetPath);
+      const normalizedSource = path.normalize(file.sourcePath);
+      pathMapping.set(normalizedSource, file.targetPath);
+      if (this.verbose) {
+        console.log(`  [MAP] ${normalizedSource}`);
+        console.log(`     -> ${file.targetPath}`);
+      }
       // Also map the other branch's path if it exists
       const node = this.nodes.get(file.nodeId);
       if (node?.retailPath && node.retailPath !== file.sourcePath) {
-        pathMapping.set(path.normalize(node.retailPath), file.targetPath);
+        const normalizedRetail = path.normalize(node.retailPath);
+        pathMapping.set(normalizedRetail, file.targetPath);
+        if (this.verbose) {
+          console.log(`  [MAP] ${normalizedRetail} (retail alt)`);
+          console.log(`     -> ${file.targetPath}`);
+        }
       }
       if (node?.restaurantPath && node.restaurantPath !== file.sourcePath) {
-        pathMapping.set(path.normalize(node.restaurantPath), file.targetPath);
+        const normalizedRestaurant = path.normalize(node.restaurantPath);
+        pathMapping.set(normalizedRestaurant, file.targetPath);
+        if (this.verbose) {
+          console.log(`  [MAP] ${normalizedRestaurant} (restaurant alt)`);
+          console.log(`     -> ${file.targetPath}`);
+        }
       }
     }
 
@@ -634,11 +655,25 @@ export class Migrator {
       // Check if the resolved import is in pathMapping
       const targetInMapping = pathMapping.get(normalizedResolved);
 
+      if (this.verbose) {
+        console.log(`\n[VERBOSE] Processing import in ${path.basename(filePath)}:`);
+        console.log(`  Import:     '${importPath}'`);
+        console.log(`  Resolved:   ${resolvedImport}`);
+        console.log(`  Normalized: ${normalizedResolved}`);
+        console.log(`  In mapping: ${targetInMapping ? 'YES -> ' + targetInMapping : 'NO'}`);
+        console.log(`  isBeingMoved: ${isBeingMoved}`);
+      }
+
       // Check if this file is being moved but the import target is NOT being moved
       if (isBeingMoved && !targetInMapping) {
         // The imported file stays in place - need to update path to point back
         const newDir = path.dirname(effectiveFilePath);
         let newImport = path.relative(newDir, resolvedImport);
+
+        if (this.verbose) {
+          console.log(`  -> FALLBACK: pointing back to original location`);
+          console.log(`     New import: ${newImport}`);
+        }
 
         // Remove extension for cleaner imports
         newImport = newImport.replace(/\.(ts|tsx)$/, '');

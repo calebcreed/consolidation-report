@@ -125,6 +125,7 @@ program
   .option('--tsconfig <path>', 'Path to tsconfig.json to resolve path aliases (e.g., @app/)')
   .option('--dry-run', 'Show what would be done without making changes', false)
   .option('--delete', 'Delete original files after migration (use --no-delete to keep)', true)
+  .option('--verbose', 'Show detailed path resolution debugging', false)
   .action(async (options) => {
     try {
       await runMigrate(options);
@@ -301,6 +302,7 @@ async function runMigrate(options: {
   tsconfig?: string;
   dryRun: boolean;
   delete: boolean;
+  verbose: boolean;
 }) {
   const retailPath = path.resolve(options.retail);
   const restaurantPath = path.resolve(options.restaurant);
@@ -380,7 +382,7 @@ async function runMigrate(options: {
     console.log(`Loading tsconfig from: ${options.tsconfig}`);
   }
   const tsconfigPath = options.tsconfig ? path.resolve(options.tsconfig) : undefined;
-  const migrator = new Migrator(retailPath, restaurantPath, sharedPath, nodes, edges, tsconfigPath);
+  const migrator = new Migrator(retailPath, restaurantPath, sharedPath, nodes, edges, tsconfigPath, options.verbose);
 
   // Determine which files to migrate
   let nodeIds: string[];
