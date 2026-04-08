@@ -179,37 +179,56 @@ export class AngularParser {
 
   private parseImports(sourceFile: SourceFile, currentFile: string): string[] {
     const imports: string[] = [];
-    const importDecls = sourceFile.getImportDeclarations();
+    const currentDir = path.dirname(currentFile);
 
+    // Parse import declarations
+    const importDecls = sourceFile.getImportDeclarations();
     for (const imp of importDecls) {
       const moduleSpecifier = imp.getModuleSpecifierValue();
-
-      // Skip external packages
-      if (!moduleSpecifier.startsWith('.') && !moduleSpecifier.startsWith('/')) {
-        continue;
+      const resolved = this.resolveModuleSpecifier(moduleSpecifier, currentDir);
+      if (resolved) {
+        imports.push(resolved);
       }
+    }
 
-      // Resolve relative path
-      const currentDir = path.dirname(currentFile);
-      let resolved = path.resolve(currentDir, moduleSpecifier);
-
-      // Handle directory imports and missing extensions
-      if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
-        resolved = path.join(resolved, 'index.ts');
-      } else if (!path.extname(resolved)) {
-        if (fs.existsSync(resolved + '.ts')) {
-          resolved = resolved + '.ts';
-        } else if (fs.existsSync(resolved + '.tsx')) {
-          resolved = resolved + '.tsx';
-        } else if (fs.existsSync(resolved + '/index.ts')) {
-          resolved = resolved + '/index.ts';
+    // Parse export declarations (re-exports like: export { X } from './foo' or export * from './bar')
+    const exportDecls = sourceFile.getExportDeclarations();
+    for (const exp of exportDecls) {
+      const moduleSpecifier = exp.getModuleSpecifierValue();
+      if (moduleSpecifier) {
+        const resolved = this.resolveModuleSpecifier(moduleSpecifier, currentDir);
+        if (resolved) {
+          imports.push(resolved);
         }
       }
-
-      imports.push(resolved);
     }
 
     return imports;
+  }
+
+  private resolveModuleSpecifier(moduleSpecifier: string, currentDir: string): string | null {
+    // Skip external packages
+    if (!moduleSpecifier.startsWith('.') && !moduleSpecifier.startsWith('/')) {
+      return null;
+    }
+
+    // Resolve relative path
+    let resolved = path.resolve(currentDir, moduleSpecifier);
+
+    // Handle directory imports and missing extensions
+    if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+      resolved = path.join(resolved, 'index.ts');
+    } else if (!path.extname(resolved)) {
+      if (fs.existsSync(resolved + '.ts')) {
+        resolved = resolved + '.ts';
+      } else if (fs.existsSync(resolved + '.tsx')) {
+        resolved = resolved + '.tsx';
+      } else if (fs.existsSync(resolved + '/index.ts')) {
+        resolved = resolved + '/index.ts';
+      }
+    }
+
+    return resolved;
   }
 
   private parseComponentDecorator(decorator: Decorator, result: ParsedFile, filePath: string): void {
