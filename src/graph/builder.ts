@@ -192,7 +192,8 @@ export class GraphBuilder {
   }
 
   private findNodeIdForFile(filePath: string): string | null {
-    return this.filesByPath.get(filePath) || null;
+    const normalized = path.normalize(filePath);
+    return this.filesByPath.get(normalized) || this.filesByPath.get(filePath) || null;
   }
 
   private extractAngularMetadata(retail: ParsedFile | null | undefined, restaurant: ParsedFile | null | undefined): FileNode['angularMetadata'] {
