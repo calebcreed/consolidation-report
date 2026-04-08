@@ -80,28 +80,26 @@ export class Migrator {
       const absolutePath = path.resolve(tsconfigPath);
       this.tsconfigBaseDir = path.dirname(absolutePath);
 
-      const content = fs.readFileSync(absolutePath, 'utf-8');
-      // Try parsing directly first, then try stripping single-line comments only
+      let content = fs.readFileSync(absolutePath, 'utf-8');
+
+      // Clean up JSON5-style syntax that tsconfig allows but JSON.parse doesn't
+      // 1. Remove single-line comments (// ...)
+      // 2. Remove trailing commas before } or ]
       let tsconfig;
       try {
         tsconfig = JSON.parse(content);
       } catch {
-        // Strip only single-line comments (// ...) not inside strings
-        // Avoid stripping /* */ as it breaks paths like "@app/*"
-        const lines = content.split('\n');
-        const cleanedLines = lines.map(line => {
-          // Only strip // comments that aren't inside a string
-          const stringMatch = line.match(/^([^"]*"[^"]*")*[^"]*/);
-          if (stringMatch) {
-            const beforeStrings = stringMatch[0];
-            const commentIndex = beforeStrings.indexOf('//');
-            if (commentIndex !== -1) {
-              return line.substring(0, line.indexOf('//'));
-            }
-          }
-          return line;
-        });
-        tsconfig = JSON.parse(cleanedLines.join('\n'));
+        // Strip single-line comments (but not inside strings)
+        let cleaned = content.replace(/^(\s*)\/\/.*$/gm, '$1');
+
+        // Strip trailing commas: ,] or ,}
+        cleaned = cleaned.replace(/,(\s*[\}\]])/g, '$1');
+
+        try {
+          tsconfig = JSON.parse(cleaned);
+        } catch (e) {
+          throw new Error(`JSON parse failed: ${e}`);
+        }
       }
 
       const paths = tsconfig.compilerOptions?.paths || {};
