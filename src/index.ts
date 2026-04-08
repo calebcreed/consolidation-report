@@ -583,6 +583,31 @@ async function runMigrate(options: {
   console.log('\nPlanning migration...');
   const plan = migrator.planMigration(nodeIds);
 
+  // DIAGNOSTIC: Check for dirty dependencies in files being migrated
+  let dirtyDepCount = 0;
+  let filesWithNoDeps = 0;
+  for (const file of plan.files) {
+    const node = nodes.get(file.nodeId);
+    if (!node) continue;
+    if (node.dependencies.length === 0) {
+      filesWithNoDeps++;
+    }
+    for (const depId of node.dependencies) {
+      const dep = nodes.get(depId);
+      if (dep && dep.divergence?.type !== 'CLEAN' && dep.divergence?.type !== 'SAME_CHANGE') {
+        if (dirtyDepCount < 10) {
+          console.log(`\n[BUG] ${file.nodeId} has DIRTY dep: ${depId} (${dep.divergence?.type})`);
+        }
+        dirtyDepCount++;
+      }
+    }
+  }
+  console.log(`\n[DIAG] Files being migrated with 0 tracked dependencies: ${filesWithNoDeps}/${plan.files.length}`);
+  if (dirtyDepCount > 0) {
+    console.log(`[BUG] Total files with dirty dependencies: ${dirtyDepCount}`);
+    console.log(`This indicates a bug in clean subtree detection!\n`);
+  }
+
   console.log(`\nMigration Plan:`);
   console.log(`  Files to move:      ${plan.stats.filesToMove}`);
   console.log(`  Files to update:    ${plan.stats.filesToUpdate}`);

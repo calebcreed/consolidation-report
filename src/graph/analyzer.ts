@@ -140,7 +140,14 @@ export class GraphAnalyzer {
     // Check all dependencies
     for (const depId of node.dependencies) {
       const dep = nodes.get(depId);
-      if (!dep) continue;
+      if (!dep) {
+        // Dependency node not found - this shouldn't happen but treat as dirty
+        console.warn(`[ANALYZER] Dep node not found: ${depId} (from ${node.id})`);
+        node.isCleanSubtree = false;
+        visiting.delete(node.id);
+        processed.add(node.id);
+        return false;
+      }
 
       const depClean = this.markNodeCleanSubtree(dep, nodes, processed, visiting);
       if (!depClean) {
