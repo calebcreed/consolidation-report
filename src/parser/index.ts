@@ -216,9 +216,15 @@ export class AngularParser {
     let resolved = path.resolve(currentDir, moduleSpecifier);
 
     // Handle directory imports and missing extensions
+    // Note: path.extname treats .component, .service, .pipe etc as extensions,
+    // so we need to check for REAL code extensions specifically
+    const ext = path.extname(resolved);
+    const isRealCodeExtension = ['.ts', '.tsx', '.js', '.jsx', '.mjs'].includes(ext);
+
     if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
       resolved = path.join(resolved, 'index.ts');
-    } else if (!path.extname(resolved)) {
+    } else if (!isRealCodeExtension) {
+      // Try adding extensions - the "extension" might be .component, .service, etc.
       if (fs.existsSync(resolved + '.ts')) {
         resolved = resolved + '.ts';
       } else if (fs.existsSync(resolved + '.tsx')) {
