@@ -27,9 +27,13 @@ export interface ParsedFile {
 export class AngularParser {
   private project: Project;
   private baseDir: string;
+  private baseUrl: string | null = null;  // For resolving non-relative imports
 
-  constructor(baseDir: string) {
+  constructor(baseDir: string, baseUrl?: string) {
     this.baseDir = baseDir;
+    // baseUrl is typically relative to tsconfig location, often "." or "src"
+    // When provided, it should be an absolute path
+    this.baseUrl = baseUrl ? path.resolve(baseUrl) : null;
     this.project = new Project({
       skipAddingFilesFromTsConfig: true,
       compilerOptions: {
@@ -37,6 +41,10 @@ export class AngularParser {
         skipLibCheck: true,
       }
     });
+  }
+
+  setBaseUrl(baseUrl: string): void {
+    this.baseUrl = path.resolve(baseUrl);
   }
 
   parseDirectory(dirPath: string, extensions: string[] = ['.ts'], showProgress: boolean = false): ParsedFile[] {
@@ -207,34 +215,52 @@ export class AngularParser {
   }
 
   private resolveModuleSpecifier(moduleSpecifier: string, currentDir: string): string | null {
-    // Skip external packages
-    if (!moduleSpecifier.startsWith('.') && !moduleSpecifier.startsWith('/')) {
-      return null;
+    // Handle relative imports
+    if (moduleSpecifier.startsWith('.') || moduleSpecifier.startsWith('/')) {
+      return this.resolveToFile(path.resolve(currentDir, moduleSpecifier));
     }
 
-    // Resolve relative path
-    let resolved = path.resolve(currentDir, moduleSpecifier);
-
-    // Handle directory imports and missing extensions
-    // Note: path.extname treats .component, .service, .pipe etc as extensions,
-    // so we need to check for REAL code extensions specifically
-    const ext = path.extname(resolved);
-    const isRealCodeExtension = ['.ts', '.tsx', '.js', '.jsx', '.mjs'].includes(ext);
-
-    if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
-      resolved = path.join(resolved, 'index.ts');
-    } else if (!isRealCodeExtension) {
-      // Try adding extensions - the "extension" might be .component, .service, etc.
-      if (fs.existsSync(resolved + '.ts')) {
-        resolved = resolved + '.ts';
-      } else if (fs.existsSync(resolved + '.tsx')) {
-        resolved = resolved + '.tsx';
-      } else if (fs.existsSync(resolved + '/index.ts')) {
-        resolved = resolved + '/index.ts';
+    // For non-relative imports, try baseUrl resolution first
+    if (this.baseUrl) {
+      const baseUrlResolved = this.resolveToFile(path.join(this.baseUrl, moduleSpecifier));
+      if (baseUrlResolved) {
+        return baseUrlResolved;
       }
     }
 
-    return resolved;
+    // Not a relative import and not found in baseUrl - must be external package
+    return null;
+  }
+
+  private resolveToFile(basePath: string): string | null {
+    // Handle directory imports and missing extensions
+    // Note: path.extname treats .component, .service, .pipe etc as extensions,
+    // so we need to check for REAL code extensions specifically
+    const ext = path.extname(basePath);
+    const isRealCodeExtension = ['.ts', '.tsx', '.js', '.jsx', '.mjs'].includes(ext);
+
+    if (fs.existsSync(basePath) && fs.statSync(basePath).isDirectory()) {
+      const indexPath = path.join(basePath, 'index.ts');
+      if (fs.existsSync(indexPath)) {
+        return indexPath;
+      }
+      return null;
+    }
+
+    if (isRealCodeExtension) {
+      return fs.existsSync(basePath) ? basePath : null;
+    }
+
+    // Try adding extensions - the "extension" might be .component, .service, etc.
+    if (fs.existsSync(basePath + '.ts')) {
+      return basePath + '.ts';
+    } else if (fs.existsSync(basePath + '.tsx')) {
+      return basePath + '.tsx';
+    } else if (fs.existsSync(basePath + '/index.ts')) {
+      return basePath + '/index.ts';
+    }
+
+    return null;
   }
 
   private parseComponentDecorator(decorator: Decorator, result: ParsedFile, filePath: string): void {

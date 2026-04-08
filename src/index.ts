@@ -14,6 +14,37 @@ import { Migrator } from './migrator';
 
 const program = new Command();
 
+/**
+ * Extract baseUrl from tsconfig.json
+ * Returns absolute path to baseUrl directory, or null if not defined
+ */
+function getBaseUrlFromTsconfig(tsconfigPath: string): string | null {
+  try {
+    const absolutePath = path.resolve(tsconfigPath);
+    const tsconfigDir = path.dirname(absolutePath);
+    let content = fs.readFileSync(absolutePath, 'utf-8');
+
+    let tsconfig;
+    try {
+      tsconfig = JSON.parse(content);
+    } catch {
+      // Strip comments and trailing commas for JSON5-style tsconfig
+      let cleaned = content.replace(/^(\s*)\/\/.*$/gm, '$1');
+      cleaned = cleaned.replace(/,(\s*[\}\]])/g, '$1');
+      tsconfig = JSON.parse(cleaned);
+    }
+
+    const baseUrl = tsconfig.compilerOptions?.baseUrl;
+    if (baseUrl) {
+      return path.resolve(tsconfigDir, baseUrl);
+    }
+    return null;
+  } catch (err) {
+    console.warn(`Warning: Could not extract baseUrl from tsconfig: ${err}`);
+    return null;
+  }
+}
+
 program
   .name('consolidate')
   .description('Analyze Angular codebase for consolidation opportunities')
@@ -425,6 +456,29 @@ async function runMigrate(options: {
   const repoRoot = options.repoRoot ? path.resolve(options.repoRoot) : findGitRoot(retailPath);
   const deleteOriginals = options.delete; // default true, --no-delete sets to false
 
+  // Extract baseUrl from tsconfig if provided
+  let retailBaseUrl: string | null = null;
+  let restaurantBaseUrl: string | null = null;
+  if (options.tsconfig) {
+    const tsconfigPath = path.resolve(options.tsconfig);
+    const baseUrl = getBaseUrlFromTsconfig(tsconfigPath);
+    if (baseUrl) {
+      // The tsconfig is likely for one branch - figure out which based on path
+      if (tsconfigPath.includes('retail')) {
+        retailBaseUrl = baseUrl;
+        // Derive restaurant baseUrl by swapping retail -> restaurant in path
+        restaurantBaseUrl = baseUrl.replace(/retail/g, 'restaurant');
+      } else if (tsconfigPath.includes('restaurant')) {
+        restaurantBaseUrl = baseUrl;
+        retailBaseUrl = baseUrl.replace(/restaurant/g, 'retail');
+      } else {
+        // Generic - use same baseUrl for both (relative to each branch's root)
+        retailBaseUrl = baseUrl;
+        restaurantBaseUrl = baseUrl;
+      }
+    }
+  }
+
   console.log('Migration Tool');
   console.log('==============');
   console.log(`Retail:           ${retailPath}`);
@@ -433,12 +487,14 @@ async function runMigrate(options: {
   console.log(`Repo root:        ${repoRoot}`);
   console.log(`Dry run:          ${options.dryRun}`);
   console.log(`Delete originals: ${deleteOriginals}`);
+  if (retailBaseUrl) console.log(`Retail baseUrl:   ${retailBaseUrl}`);
+  if (restaurantBaseUrl) console.log(`Restaurant baseUrl: ${restaurantBaseUrl}`);
   console.log('');
 
   // Step 1: Parse files
   console.log('Parsing files...');
-  const retailParser = new AngularParser(retailPath);
-  const restaurantParser = new AngularParser(restaurantPath);
+  const retailParser = new AngularParser(retailPath, retailBaseUrl || undefined);
+  const restaurantParser = new AngularParser(restaurantPath, restaurantBaseUrl || undefined);
 
   const retailFiles = retailParser.parseDirectory(retailPath, ['.ts', '.tsx', '.scss', '.html']);
   const restaurantFiles = restaurantParser.parseDirectory(restaurantPath, ['.ts', '.tsx', '.scss', '.html']);

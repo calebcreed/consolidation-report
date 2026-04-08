@@ -52,6 +52,8 @@ export class Migrator {
   private edges: DependencyEdge[];
   private pathAliases: PathAlias[] = [];
   private tsconfigBaseDir: string = '';
+  private retailBaseUrl: string | null = null;  // For resolving bare imports in retail
+  private restaurantBaseUrl: string | null = null;  // For resolving bare imports in restaurant
   private verbose: boolean = false;
 
   constructor(
@@ -109,6 +111,21 @@ export class Migrator {
       const baseUrl = tsconfig.compilerOptions?.baseUrl || '.';
       const baseUrlAbsolute = path.resolve(this.tsconfigBaseDir, baseUrl);
 
+      // Derive both baseUrls based on which branch the tsconfig is from
+      if (absolutePath.includes('retail')) {
+        this.retailBaseUrl = baseUrlAbsolute;
+        this.restaurantBaseUrl = baseUrlAbsolute.replace(/retail/g, 'restaurant');
+      } else if (absolutePath.includes('restaurant')) {
+        this.restaurantBaseUrl = baseUrlAbsolute;
+        this.retailBaseUrl = baseUrlAbsolute.replace(/restaurant/g, 'retail');
+      } else {
+        // Generic - derive from retail/restaurant paths
+        // baseUrl is typically "src" or "." - apply it relative to each branch
+        const relativeBaseUrl = baseUrl; // e.g., "src" or "."
+        this.retailBaseUrl = path.resolve(this.retailPath, relativeBaseUrl);
+        this.restaurantBaseUrl = path.resolve(this.restaurantPath, relativeBaseUrl);
+      }
+
       for (const [alias, aliasPaths] of Object.entries(paths)) {
         this.pathAliases.push({
           alias,
@@ -116,6 +133,8 @@ export class Migrator {
         });
       }
 
+      console.log(`  Loaded retail baseUrl: ${this.retailBaseUrl}`);
+      console.log(`  Loaded restaurant baseUrl: ${this.restaurantBaseUrl}`);
       console.log(`  Loaded ${this.pathAliases.length} path aliases from tsconfig`);
       for (const pa of this.pathAliases.slice(0, 5)) {
         console.log(`    ${pa.alias} -> ${pa.paths[0]}`);
@@ -643,8 +662,24 @@ export class Migrator {
           warnings.push(`[RELATIVE] Cannot resolve '${importPath}' in ${path.basename(filePath)} (tried ${basePath}.ts)`);
         }
       } else {
-        // External package - skip
-        continue;
+        // Not relative, not aliased - try baseUrl resolution (for bare imports like 'Payments/...')
+        // Use the correct baseUrl based on which branch this file is from
+        const isRetailFile = filePath.startsWith(this.retailPath);
+        const baseUrl = isRetailFile ? this.retailBaseUrl : this.restaurantBaseUrl;
+
+        if (baseUrl) {
+          const baseUrlPath = path.join(baseUrl, importPath);
+          resolvedImport = this.resolveToFile(baseUrlPath);
+
+          if (this.verbose && resolvedImport) {
+            console.log(`  [BASEURL] Resolved '${importPath}' via ${isRetailFile ? 'retail' : 'restaurant'} baseUrl -> ${resolvedImport}`);
+          }
+        }
+
+        // If still not resolved, it's an external package - skip
+        if (!resolvedImport) {
+          continue;
+        }
       }
 
       if (!resolvedImport) continue;
