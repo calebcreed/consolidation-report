@@ -381,15 +381,29 @@ async function runMigrateList(options: {
   // Count nodes with unresolved imports
   let nodesWithUnresolved = 0;
   let totalUnresolved = 0;
+  const sampleUnresolved: Array<{file: string, imports: string[]}> = [];
   for (const node of nodes.values()) {
     if (node.unresolvedImports && node.unresolvedImports.length > 0) {
       nodesWithUnresolved++;
       totalUnresolved += node.unresolvedImports.length;
+      if (sampleUnresolved.length < 5) {
+        sampleUnresolved.push({
+          file: node.relativePath,
+          imports: node.unresolvedImports.slice(0, 3)
+        });
+      }
     }
   }
   if (nodesWithUnresolved > 0) {
     console.log(`\n  Files with unresolved imports: ${nodesWithUnresolved} (${totalUnresolved} total imports)`);
     console.log(`  (These are blocked from clean subtree migration)`);
+    console.log(`  Sample unresolved:`);
+    for (const sample of sampleUnresolved) {
+      console.log(`    ${sample.file}:`);
+      for (const imp of sample.imports) {
+        console.log(`      -> ${imp}`);
+      }
+    }
   }
 
   // Get movable subtrees

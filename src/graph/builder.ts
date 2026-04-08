@@ -157,11 +157,12 @@ export class GraphBuilder {
   }
 
   private indexNode(node: FileNode, retailFile: ParsedFile | null | undefined, restaurantFile: ParsedFile | null | undefined): void {
+    // Normalize paths for consistent lookup
     if (node.retailPath) {
-      this.filesByPath.set(node.retailPath, node.id);
+      this.filesByPath.set(path.normalize(node.retailPath), node.id);
     }
     if (node.restaurantPath) {
-      this.filesByPath.set(node.restaurantPath, node.id);
+      this.filesByPath.set(path.normalize(node.restaurantPath), node.id);
     }
 
     const metadata = node.angularMetadata;
@@ -214,7 +215,9 @@ export class GraphBuilder {
 
     // ES imports
     for (const importPath of file.imports) {
-      const targetId = this.filesByPath.get(importPath);
+      // Normalize for consistent lookup
+      const normalizedImport = path.normalize(importPath);
+      const targetId = this.filesByPath.get(normalizedImport) || this.filesByPath.get(importPath);
       if (targetId && targetId !== nodeId) {
         this.addEdge(nodeId, targetId, 'import');
       } else if (!targetId && node) {
