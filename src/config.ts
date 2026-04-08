@@ -57,6 +57,7 @@ export interface FileNode {
   divergence: DivergenceInfo | null;
   dependencies: string[];  // IDs of files this depends on
   dependents: string[];    // IDs of files that depend on this
+  unresolvedImports: string[]; // Imports that couldn't be resolved to nodes (blocks clean subtree)
   isCleanSubtree: boolean; // This node and all descendants are clean
   depth: number;           // Depth in dependency graph
 }

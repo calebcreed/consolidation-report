@@ -46,6 +46,7 @@ export class GraphBuilder {
         divergence: diffResult?.divergence || null,
         dependencies: [],
         dependents: [],
+        unresolvedImports: [],
         isCleanSubtree: false,
         depth: 0,
       };
@@ -76,6 +77,7 @@ export class GraphBuilder {
         },
         dependencies: [],
         dependents: [],
+        unresolvedImports: [],
         isCleanSubtree: false,
         depth: 0,
       };
@@ -106,6 +108,7 @@ export class GraphBuilder {
         },
         dependencies: [],
         dependents: [],
+        unresolvedImports: [],
         isCleanSubtree: false,
         depth: 0,
       };
@@ -207,11 +210,17 @@ export class GraphBuilder {
   }
 
   private addDependencyEdges(nodeId: string, file: ParsedFile): void {
+    const node = this.nodes.get(nodeId);
+
     // ES imports
     for (const importPath of file.imports) {
       const targetId = this.filesByPath.get(importPath);
       if (targetId && targetId !== nodeId) {
         this.addEdge(nodeId, targetId, 'import');
+      } else if (!targetId && node) {
+        // Import couldn't be resolved - track it as unresolved
+        // This blocks the file from being a clean subtree
+        node.unresolvedImports.push(importPath);
       }
     }
 

@@ -378,6 +378,20 @@ async function runMigrateList(options: {
   console.log(`  Restaurant only: ${result.stats.restaurantOnlyFiles}`);
   console.log(`  Conflicts:       ${result.stats.conflictFiles}`);
 
+  // Count nodes with unresolved imports
+  let nodesWithUnresolved = 0;
+  let totalUnresolved = 0;
+  for (const node of nodes.values()) {
+    if (node.unresolvedImports && node.unresolvedImports.length > 0) {
+      nodesWithUnresolved++;
+      totalUnresolved += node.unresolvedImports.length;
+    }
+  }
+  if (nodesWithUnresolved > 0) {
+    console.log(`\n  Files with unresolved imports: ${nodesWithUnresolved} (${totalUnresolved} total imports)`);
+    console.log(`  (These are blocked from clean subtree migration)`);
+  }
+
   // Get movable subtrees
   const migrator = new Migrator(retailPath, restaurantPath, sharedPath, nodes, edges);
   const movable = migrator.getMovableSubtrees();

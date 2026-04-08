@@ -129,6 +129,14 @@ export class GraphAnalyzer {
       return false;
     }
 
+    // Check for unresolved imports - these block clean subtree status
+    if (node.unresolvedImports && node.unresolvedImports.length > 0) {
+      node.isCleanSubtree = false;
+      visiting.delete(node.id);
+      processed.add(node.id);
+      return false;
+    }
+
     // Check all dependencies
     for (const depId of node.dependencies) {
       const dep = nodes.get(depId);
