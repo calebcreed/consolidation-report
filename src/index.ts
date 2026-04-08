@@ -135,6 +135,121 @@ program
     }
   });
 
+program
+  .command('check-shared')
+  .description('Check shared folder for dirty imports pointing back to retail/restaurant')
+  .requiredOption('-r, --retail <path>', 'Path to retail app directory')
+  .requiredOption('-t, --restaurant <path>', 'Path to restaurant app directory')
+  .requiredOption('-s, --shared <path>', 'Path to shared directory')
+  .action(async (options) => {
+    try {
+      await runCheckShared(options);
+    } catch (err) {
+      console.error('Error:', err);
+      process.exit(1);
+    }
+  });
+
+async function runCheckShared(options: {
+  retail: string;
+  restaurant: string;
+  shared: string;
+}) {
+  const retailPath = path.resolve(options.retail);
+  const restaurantPath = path.resolve(options.restaurant);
+  const sharedPath = path.resolve(options.shared);
+
+  console.log('Checking shared folder for dirty imports...');
+  console.log(`Retail:     ${retailPath}`);
+  console.log(`Restaurant: ${restaurantPath}`);
+  console.log(`Shared:     ${sharedPath}\n`);
+
+  // Parse shared files
+  const parser = new AngularParser(sharedPath);
+  const sharedFiles = parser.parseDirectory(sharedPath, ['.ts', '.tsx']);
+
+  console.log(`Scanning ${sharedFiles.length} files in shared...\n`);
+
+  const dirtyImports: Array<{
+    file: string;
+    importPath: string;
+    pointsTo: 'retail' | 'restaurant';
+  }> = [];
+
+  for (const file of sharedFiles) {
+    // Check each import
+    for (const imp of file.imports) {
+      if (imp.includes(retailPath) || imp.includes('/retail/')) {
+        dirtyImports.push({
+          file: file.relativePath,
+          importPath: imp,
+          pointsTo: 'retail',
+        });
+      } else if (imp.includes(restaurantPath) || imp.includes('/restaurant/')) {
+        dirtyImports.push({
+          file: file.relativePath,
+          importPath: imp,
+          pointsTo: 'restaurant',
+        });
+      }
+    }
+
+    // Also check the raw file content for string patterns
+    const content = fs.readFileSync(file.filePath, 'utf-8');
+    const importRegex = /(?:import|export)\s+.*?from\s+['"]([^'"]+)['"]/g;
+    let match;
+    while ((match = importRegex.exec(content)) !== null) {
+      const importStr = match[1];
+      if (importStr.includes('/retail/') || importStr.includes('../retail/')) {
+        const alreadyFound = dirtyImports.some(d => d.file === file.relativePath && d.importPath.includes(importStr));
+        if (!alreadyFound) {
+          dirtyImports.push({
+            file: file.relativePath,
+            importPath: importStr,
+            pointsTo: 'retail',
+          });
+        }
+      } else if (importStr.includes('/restaurant/') || importStr.includes('../restaurant/')) {
+        const alreadyFound = dirtyImports.some(d => d.file === file.relativePath && d.importPath.includes(importStr));
+        if (!alreadyFound) {
+          dirtyImports.push({
+            file: file.relativePath,
+            importPath: importStr,
+            pointsTo: 'restaurant',
+          });
+        }
+      }
+    }
+  }
+
+  if (dirtyImports.length === 0) {
+    console.log('✓ No dirty imports found. Shared folder is clean.\n');
+  } else {
+    console.log(`✗ Found ${dirtyImports.length} dirty imports:\n`);
+
+    // Group by file
+    const byFile = new Map<string, typeof dirtyImports>();
+    for (const dirty of dirtyImports) {
+      if (!byFile.has(dirty.file)) {
+        byFile.set(dirty.file, []);
+      }
+      byFile.get(dirty.file)!.push(dirty);
+    }
+
+    for (const [file, imports] of byFile) {
+      console.log(`  ${file}:`);
+      for (const imp of imports) {
+        console.log(`    -> ${imp.pointsTo}: ${imp.importPath}`);
+      }
+      console.log('');
+    }
+
+    console.log('These files have dependencies on dirty nodes and should not be in shared.');
+    console.log('Either the dependencies need to be migrated first, or these files should be removed from shared.\n');
+    process.exit(1);
+  }
+}
+
 async function runMigrateList(options: {
   retail: string;
   restaurant: string;
