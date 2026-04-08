@@ -118,35 +118,20 @@ export class GraphBuilder {
     }
 
     // Build edges from retail files (primary source of dependency info)
-    let retailFound = 0, retailMissed = 0, totalImports = 0;
     for (const file of retailFiles) {
       const nodeId = this.findNodeIdForFile(file.filePath);
-      if (!nodeId) {
-        retailMissed++;
-        continue;
+      if (nodeId) {
+        this.addDependencyEdges(nodeId, file);
       }
-      retailFound++;
-      totalImports += file.imports.length;
-      this.addDependencyEdges(nodeId, file);
     }
 
     // Also process restaurant files for any additional edges
-    let restFound = 0, restMissed = 0;
     for (const file of restaurantFiles) {
       const nodeId = this.findNodeIdForFile(file.filePath);
-      if (!nodeId) {
-        restMissed++;
-        continue;
+      if (nodeId) {
+        this.addDependencyEdges(nodeId, file);
       }
-      restFound++;
-      totalImports += file.imports.length;
-      this.addDependencyEdges(nodeId, file);
     }
-
-    console.log(`  [Graph] Retail files: ${retailFound} found, ${retailMissed} missed`);
-    console.log(`  [Graph] Restaurant files: ${restFound} found, ${restMissed} missed`);
-    console.log(`  [Graph] Total imports to process: ${totalImports}`);
-    console.log(`  [Graph] Edges created: ${this.edges.length}`);
 
     // Populate dependents (reverse of dependencies)
     for (const edge of this.edges) {

@@ -18,7 +18,14 @@ const program = new Command();
  * Extract baseUrl from tsconfig.json
  * Returns absolute path to baseUrl directory, or null if not defined
  */
-function getBaseUrlFromTsconfig(tsconfigPath: string): string | null {
+interface TsconfigInfo {
+  baseUrl: string | null;
+  pathAliases: Array<{ alias: string; paths: string[] }>;
+}
+
+function parseTsconfig(tsconfigPath: string): TsconfigInfo {
+  const result: TsconfigInfo = { baseUrl: null, pathAliases: [] };
+
   try {
     const absolutePath = path.resolve(tsconfigPath);
     const tsconfigDir = path.dirname(absolutePath);
@@ -34,15 +41,26 @@ function getBaseUrlFromTsconfig(tsconfigPath: string): string | null {
       tsconfig = JSON.parse(cleaned);
     }
 
-    const baseUrl = tsconfig.compilerOptions?.baseUrl;
-    if (baseUrl) {
-      return path.resolve(tsconfigDir, baseUrl);
+    const baseUrl = tsconfig.compilerOptions?.baseUrl || '.';
+    result.baseUrl = path.resolve(tsconfigDir, baseUrl);
+
+    // Extract path aliases
+    const paths = tsconfig.compilerOptions?.paths || {};
+    for (const [alias, aliasPaths] of Object.entries(paths)) {
+      result.pathAliases.push({
+        alias,
+        paths: (aliasPaths as string[]).map(p => path.resolve(result.baseUrl!, p)),
+      });
     }
-    return null;
   } catch (err) {
-    console.warn(`Warning: Could not extract baseUrl from tsconfig: ${err}`);
-    return null;
+    console.warn(`Warning: Could not parse tsconfig: ${err}`);
   }
+
+  return result;
+}
+
+function getBaseUrlFromTsconfig(tsconfigPath: string): string | null {
+  return parseTsconfig(tsconfigPath).baseUrl;
 }
 
 program
@@ -456,25 +474,40 @@ async function runMigrate(options: {
   const repoRoot = options.repoRoot ? path.resolve(options.repoRoot) : findGitRoot(retailPath);
   const deleteOriginals = options.delete; // default true, --no-delete sets to false
 
-  // Extract baseUrl from tsconfig if provided
+  // Extract baseUrl and path aliases from tsconfig if provided
   let retailBaseUrl: string | null = null;
   let restaurantBaseUrl: string | null = null;
+  let retailPathAliases: Array<{ alias: string; paths: string[] }> = [];
+  let restaurantPathAliases: Array<{ alias: string; paths: string[] }> = [];
+
   if (options.tsconfig) {
     const tsconfigPath = path.resolve(options.tsconfig);
-    const baseUrl = getBaseUrlFromTsconfig(tsconfigPath);
-    if (baseUrl) {
+    const tsconfigInfo = parseTsconfig(tsconfigPath);
+
+    if (tsconfigInfo.baseUrl) {
       // The tsconfig is likely for one branch - figure out which based on path
       if (tsconfigPath.includes('retail')) {
-        retailBaseUrl = baseUrl;
-        // Derive restaurant baseUrl by swapping retail -> restaurant in path
-        restaurantBaseUrl = baseUrl.replace(/retail/g, 'restaurant');
+        retailBaseUrl = tsconfigInfo.baseUrl;
+        restaurantBaseUrl = tsconfigInfo.baseUrl.replace(/retail/g, 'restaurant');
+        retailPathAliases = tsconfigInfo.pathAliases;
+        // Derive restaurant aliases by swapping paths
+        restaurantPathAliases = tsconfigInfo.pathAliases.map(a => ({
+          alias: a.alias,
+          paths: a.paths.map(p => p.replace(/retail/g, 'restaurant'))
+        }));
       } else if (tsconfigPath.includes('restaurant')) {
-        restaurantBaseUrl = baseUrl;
-        retailBaseUrl = baseUrl.replace(/restaurant/g, 'retail');
+        restaurantBaseUrl = tsconfigInfo.baseUrl;
+        retailBaseUrl = tsconfigInfo.baseUrl.replace(/restaurant/g, 'retail');
+        restaurantPathAliases = tsconfigInfo.pathAliases;
+        retailPathAliases = tsconfigInfo.pathAliases.map(a => ({
+          alias: a.alias,
+          paths: a.paths.map(p => p.replace(/restaurant/g, 'retail'))
+        }));
       } else {
-        // Generic - use same baseUrl for both (relative to each branch's root)
-        retailBaseUrl = baseUrl;
-        restaurantBaseUrl = baseUrl;
+        retailBaseUrl = tsconfigInfo.baseUrl;
+        restaurantBaseUrl = tsconfigInfo.baseUrl;
+        retailPathAliases = tsconfigInfo.pathAliases;
+        restaurantPathAliases = tsconfigInfo.pathAliases;
       }
     }
   }
@@ -489,12 +522,15 @@ async function runMigrate(options: {
   console.log(`Delete originals: ${deleteOriginals}`);
   if (retailBaseUrl) console.log(`Retail baseUrl:   ${retailBaseUrl}`);
   if (restaurantBaseUrl) console.log(`Restaurant baseUrl: ${restaurantBaseUrl}`);
+  if (retailPathAliases.length > 0) console.log(`Path aliases:     ${retailPathAliases.length}`);
   console.log('');
 
   // Step 1: Parse files
   console.log('Parsing files...');
   const retailParser = new AngularParser(retailPath, retailBaseUrl || undefined);
+  if (retailPathAliases.length > 0) retailParser.setPathAliases(retailPathAliases);
   const restaurantParser = new AngularParser(restaurantPath, restaurantBaseUrl || undefined);
+  if (restaurantPathAliases.length > 0) restaurantParser.setPathAliases(restaurantPathAliases);
 
   const retailFiles = retailParser.parseDirectory(retailPath, ['.ts', '.tsx', '.scss', '.html']);
   const restaurantFiles = restaurantParser.parseDirectory(restaurantPath, ['.ts', '.tsx', '.scss', '.html']);
@@ -651,37 +687,6 @@ async function runMigrate(options: {
     console.log(`\nAll imports resolved successfully.`);
   }
 
-  // DIAGNOSTIC: Check for dirty dependencies in files that were migrated
-  console.log(`\n========================================`);
-  console.log(`DEPENDENCY DIAGNOSTIC`);
-  console.log(`========================================`);
-  let dirtyDepCount = 0;
-  let filesWithNoDeps = 0;
-  for (const file of plan.files) {
-    const node = nodes.get(file.nodeId);
-    if (!node) continue;
-    if (node.dependencies.length === 0) {
-      filesWithNoDeps++;
-    }
-    for (const depId of node.dependencies) {
-      const dep = nodes.get(depId);
-      if (dep && dep.divergence?.type !== 'CLEAN' && dep.divergence?.type !== 'SAME_CHANGE') {
-        if (dirtyDepCount < 10) {
-          console.log(`[BUG] ${file.nodeId}`);
-          console.log(`      has DIRTY dep: ${depId} (${dep.divergence?.type})`);
-        }
-        dirtyDepCount++;
-      }
-    }
-  }
-  console.log(`Files with 0 tracked deps: ${filesWithNoDeps}/${plan.files.length}`);
-  if (dirtyDepCount > 0) {
-    console.log(`Files with dirty deps: ${dirtyDepCount}`);
-    console.log(`^^^ BUG in clean subtree detection!`);
-  } else {
-    console.log(`No dirty dependencies found in migrated files.`);
-  }
-  console.log(`========================================`);
 }
 
 async function runValidation(options: {

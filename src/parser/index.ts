@@ -24,10 +24,16 @@ export interface ParsedFile {
   ngrxFileType?: 'action' | 'reducer' | 'effect' | 'selector' | 'state' | null;
 }
 
+export interface PathAlias {
+  alias: string;      // e.g., "@app/*"
+  paths: string[];    // e.g., ["/abs/path/to/app/*"]
+}
+
 export class AngularParser {
   private project: Project;
   private baseDir: string;
   private baseUrl: string | null = null;  // For resolving non-relative imports
+  private pathAliases: PathAlias[] = [];  // For resolving aliased imports like @app/*
 
   constructor(baseDir: string, baseUrl?: string) {
     this.baseDir = baseDir;
@@ -45,6 +51,10 @@ export class AngularParser {
 
   setBaseUrl(baseUrl: string): void {
     this.baseUrl = path.resolve(baseUrl);
+  }
+
+  setPathAliases(aliases: PathAlias[]): void {
+    this.pathAliases = aliases;
   }
 
   parseDirectory(dirPath: string, extensions: string[] = ['.ts'], showProgress: boolean = false): ParsedFile[] {
@@ -220,7 +230,13 @@ export class AngularParser {
       return this.resolveToFile(path.resolve(currentDir, moduleSpecifier));
     }
 
-    // For non-relative imports, try baseUrl resolution first
+    // Try path alias resolution (e.g., @app/shared, @app/utils/*)
+    const aliasResolved = this.resolvePathAlias(moduleSpecifier);
+    if (aliasResolved) {
+      return aliasResolved;
+    }
+
+    // For non-relative imports, try baseUrl resolution
     if (this.baseUrl) {
       const baseUrlResolved = this.resolveToFile(path.join(this.baseUrl, moduleSpecifier));
       if (baseUrlResolved) {
@@ -228,7 +244,33 @@ export class AngularParser {
       }
     }
 
-    // Not a relative import and not found in baseUrl - must be external package
+    // Not a relative import and not found - must be external package
+    return null;
+  }
+
+  private resolvePathAlias(moduleSpecifier: string): string | null {
+    for (const { alias, paths } of this.pathAliases) {
+      // Handle wildcard aliases like "@app/*"
+      if (alias.endsWith('/*')) {
+        const aliasPrefix = alias.slice(0, -2); // "@app"
+        if (moduleSpecifier.startsWith(aliasPrefix + '/')) {
+          const remainder = moduleSpecifier.slice(aliasPrefix.length + 1); // "utils/foo"
+          for (const aliasPath of paths) {
+            const basePath = aliasPath.endsWith('/*') ? aliasPath.slice(0, -2) : aliasPath;
+            const resolved = this.resolveToFile(path.join(basePath, remainder));
+            if (resolved) return resolved;
+          }
+        }
+      } else {
+        // Exact match alias like "@app/shared" -> ["app/shared/index.ts"]
+        if (moduleSpecifier === alias) {
+          for (const aliasPath of paths) {
+            const resolved = this.resolveToFile(aliasPath);
+            if (resolved) return resolved;
+          }
+        }
+      }
+    }
     return null;
   }
 
