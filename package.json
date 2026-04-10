@@ -11,6 +11,7 @@
     "start": "node dist/index.js",
     "analyze": "npm run build && npm start",
     "verify": "npm run build && node dist/v2/verify.js",
+    "report": "npm run build && node dist/v2/demo-report.js",
     "test": "jest",
     "test:v2": "jest src/v2/"
   },

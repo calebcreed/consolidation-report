@@ -41,24 +41,18 @@ export {
   SemanticComparator,
 } from './diff';
 
-// Integration types
-export interface AnalysisOptions {
-  restaurantPath: string;
-  retailPath: string;
-  sharedPath?: string;
-  tsconfigPath: string;
-}
+// Report
+export {
+  // Types
+  FileMatch as ReportFileMatch,
+  FileStatus,
+  CleanSubtree,
+  BottleneckNode,
+  SummaryStats,
+  AnalysisReport,
 
-export interface FileMatch {
-  restaurantFile: string;
-  retailFile: string;
-  diff: import('./diff').DiffResult;
-}
-
-export interface AnalysisResult {
-  restaurantGraph: import('./deps').DependencyGraph;
-  retailGraph: import('./deps').DependencyGraph;
-  matches: FileMatch[];
-  cleanSubtrees: Set<string>;
-  dirtyFiles: Set<string>;
-}
+  // Classes
+  ReportAnalyzer,
+  TerminalReporter,
+  HtmlReporter,
+} from './report';
