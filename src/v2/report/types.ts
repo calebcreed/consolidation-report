@@ -21,6 +21,13 @@ export interface FileMatch {
   isCleanSubtree: boolean;
   dependencies: string[];    // relativePaths this file depends on
   dependents: string[];      // relativePaths that depend on this file
+  // Optional unified diff text for display
+  diffText?: {
+    retail: string;      // Retail vs base diff
+    restaurant: string;  // Restaurant vs base diff
+  };
+  // Lines changed (for impact score calculation)
+  linesChanged?: number;
 }
 
 export interface CleanSubtree {
@@ -36,7 +43,8 @@ export interface BottleneckNode {
   status: FileStatus;
   unlockCount: number;       // Number of clean nodes unlocked if this is resolved
   unlockedPaths: string[];   // Sample of paths that would be unlocked
-  impactScore: number;       // unlockCount (higher = more valuable to resolve)
+  linesChanged: number;      // Lines that need to be changed/merged to resolve
+  impactScore: number;       // unlockCount / linesChanged (higher = more bang for buck)
 }
 
 export interface SummaryStats {

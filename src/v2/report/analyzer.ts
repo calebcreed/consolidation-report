@@ -338,18 +338,23 @@ export class ReportAnalyzer {
       if (!file) continue;
 
       const unlocked = unlockMap.get(blockerPath) || [];
+      const linesChanged = file.linesChanged || 1; // Default to 1 to avoid division by zero
+
+      // Impact score = files unlocked per line of change (higher = better ROI)
+      const impactScore = unlocked.length / linesChanged;
 
       bottlenecks.push({
         relativePath: blockerPath,
         status: file.status,
         unlockCount: unlocked.length,
         unlockedPaths: unlocked.slice(0, 10), // Sample
-        impactScore: unlocked.length, // Simple impact = files unlocked
+        linesChanged,
+        impactScore,
       });
     }
 
-    // Sort by unlockCount descending
-    bottlenecks.sort((a, b) => b.unlockCount - a.unlockCount);
+    // Sort by impactScore descending (best bang for buck first)
+    bottlenecks.sort((a, b) => b.impactScore - a.impactScore);
 
     return bottlenecks;
   }

@@ -131,6 +131,30 @@ function createMockFileMatches(graph: import('./deps/graph').DependencyGraph): F
       })
       .filter((p, i, arr) => arr.indexOf(p) === i);
 
+    // Generate sample diff text for conflicts
+    let diffText: { retail: string; restaurant: string } | undefined;
+    if (status === 'conflict') {
+      const filename = relativePath.split('/').pop() || 'file.ts';
+      diffText = {
+        retail: generateSampleDiff(filename, 'retail'),
+        restaurant: generateSampleDiff(filename, 'restaurant'),
+      };
+    }
+
+    // Generate mock lines changed for non-clean files
+    let linesChanged: number | undefined;
+    if (status !== 'clean') {
+      // Simulate varying levels of effort based on status
+      const baseLines = (simpleHash(relativePath + 'lines') % 50) + 5;
+      if (status === 'conflict') {
+        linesChanged = baseLines * 2; // Conflicts need more work
+      } else if (status === 'same-change') {
+        linesChanged = baseLines; // Same change - just review
+      } else {
+        linesChanged = baseLines; // One-sided changes
+      }
+    }
+
     matches.push({
       relativePath,
       retailPath: filePath,
@@ -140,6 +164,8 @@ function createMockFileMatches(graph: import('./deps/graph').DependencyGraph): F
       isCleanSubtree: false, // Will be computed by analyzer
       dependencies,
       dependents,
+      diffText,
+      linesChanged,
     });
   }
 
@@ -157,6 +183,42 @@ function simpleHash(str: string): number {
     hash = hash & hash;
   }
   return Math.abs(hash);
+}
+
+/**
+ * Generate sample unified diff for demo purposes
+ */
+function generateSampleDiff(filename: string, branch: 'retail' | 'restaurant'): string {
+  if (branch === 'retail') {
+    return `--- a/${filename}
++++ b/${filename}
+@@ -10,7 +10,9 @@ export class SomeService {
+   constructor(private http: HttpClient) {}
+
+   getData(): Observable<Data> {
+-    return this.http.get<Data>('/api/data');
++    // Added retail-specific caching
++    return this.http.get<Data>('/api/data').pipe(
++      shareReplay(1)
++    );
+   }
+ }`;
+  } else {
+    return `--- a/${filename}
++++ b/${filename}
+@@ -10,7 +10,10 @@ export class SomeService {
+   constructor(private http: HttpClient) {}
+
+   getData(): Observable<Data> {
+-    return this.http.get<Data>('/api/data');
++    // Added restaurant-specific error handling
++    return this.http.get<Data>('/api/data').pipe(
++      retry(3),
++      catchError(this.handleError)
++    );
+   }
+ }`;
+  }
 }
 
 main().catch(err => {
