@@ -153,7 +153,9 @@ export class StateManager {
 
       // Move files to shared
       for (const file of subtree.files) {
-        const srcPath = path.join(config.projectPath, 'apps/restaurant/src', file);
+        // file is relativePath like "src/app/utils/foo.ts"
+        // Source is in apps/restaurant/src/, so we need apps/restaurant/ + file
+        const srcPath = path.join(config.projectPath, 'apps/restaurant', file);
         const destPath = path.join(config.projectPath, config.sharedPath, file);
 
         if (fs.existsSync(srcPath)) {
@@ -186,6 +188,10 @@ export class StateManager {
     } catch (e: any) {
       record.status = 'rolled-back';
       this.state.lastError = e.message;
+      this.emitOutput(`Migration error: ${e.message}`);
+      if (e.stderr) {
+        this.emitOutput(`stderr: ${e.stderr}`);
+      }
       throw e;
     }
   }
@@ -272,13 +278,19 @@ export class StateManager {
     this.emitOutput(`Rolling back migration: ${lastMigration.subtreeRoot}`);
 
     try {
-      // Use git checkout to restore files
+      // Reset any staged changes
+      execSync('git reset HEAD', {
+        cwd: config.projectPath,
+        encoding: 'utf-8',
+      });
+
+      // Restore any modified/deleted tracked files
       execSync('git checkout HEAD -- .', {
         cwd: config.projectPath,
         encoding: 'utf-8',
       });
 
-      // Clean up any untracked files that were created
+      // Clean up any untracked files/directories that were created
       execSync('git clean -fd', {
         cwd: config.projectPath,
         encoding: 'utf-8',
@@ -288,6 +300,7 @@ export class StateManager {
       this.emitOutput('Rollback complete');
     } catch (e: any) {
       this.state.lastError = e.message;
+      this.emitOutput(`Rollback error: ${e.message}`);
       throw e;
     }
   }
@@ -307,23 +320,46 @@ export class StateManager {
    */
   getErrorsForClaude(): string {
     const output = this.state.currentBuild.output;
-    const errors = output.filter(line =>
+
+    // Get error lines (broader matching)
+    const errorLines = output.filter(line =>
       line.includes('error') ||
       line.includes('Error') ||
       line.includes('ERROR') ||
+      line.includes('fatal') ||
+      line.includes('Fatal') ||
       line.includes('Cannot find') ||
-      line.includes('TS')
+      line.includes('not found') ||
+      line.includes('failed') ||
+      line.includes('Failed') ||
+      line.includes('TS') ||
+      line.includes('✖') ||
+      line.includes('ENOENT') ||
+      line.includes('Module build failed')
     );
 
-    return `Build errors from WebPOS consolidation migration:
+    // Also include last 30 lines of output for context
+    const recentOutput = output.slice(-30);
 
+    const lastMigration = this.state.migrations[this.state.migrations.length - 1];
+
+    return `Build/Migration errors from WebPOS consolidation:
+
+**Error lines:**
 \`\`\`
-${errors.slice(-50).join('\n')}
+${errorLines.length > 0 ? errorLines.slice(-30).join('\n') : '(no specific error lines detected)'}
 \`\`\`
 
-Full context:
-- Migrated subtree: ${this.state.migrations[this.state.migrations.length - 1]?.subtreeRoot || 'unknown'}
-- Files moved: ${this.state.migrations[this.state.migrations.length - 1]?.files.length || 0}
+**Recent output:**
+\`\`\`
+${recentOutput.join('\n')}
+\`\`\`
+
+**Context:**
+- Last migrated subtree: ${lastMigration?.subtreeRoot || 'none'}
+- Files moved: ${lastMigration?.files.length || 0}
+- Migration status: ${lastMigration?.status || 'none'}
+- Last error: ${this.state.lastError || 'none'}
 `;
   }
 }
