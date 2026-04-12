@@ -93,6 +93,16 @@ export class ReportAnalyzer {
       // Skip external dependencies
       if (depPath.startsWith('external:')) continue;
 
+      // Skip dependencies that point to merged (already migrated = safe)
+      if (depPath.includes('/merged/') || depPath.startsWith('merged:')) continue;
+
+      // If dependency is not in our files map, it might be in merged already
+      if (!this.files.has(depPath)) {
+        // Check if this looks like an already-migrated file (path to merged)
+        // If it's truly missing/broken, that's a different problem
+        continue;
+      }
+
       const depClean = this.isCleanSubtree(depPath, visiting);
       if (!depClean) {
         file.isCleanSubtree = false;
@@ -258,96 +268,49 @@ export class ReportAnalyzer {
 
   /**
    * Find bottleneck nodes - dirty nodes that block the most clean files
-   * Returns nodes ranked by unlockCount (descending)
+   *
+   * For each dirty node, calculate: if we fix this node, how many currently-blocked
+   * clean nodes would become part of clean subtrees (transitively)?
+   *
+   * Impact score = unlocked files / lines to change (higher = better ROI)
    */
   private findBottlenecks(): BottleneckNode[] {
     const bottlenecks: BottleneckNode[] = [];
 
-    // Find all dirty nodes (blockers)
-    const blockers = new Set<string>();
+    // Find all dirty nodes (potential bottlenecks)
+    const dirtyNodes: string[] = [];
     for (const file of this.files.values()) {
       if (file.status !== 'clean' && file.status !== 'same-change') {
-        blockers.add(file.relativePath);
+        dirtyNodes.push(file.relativePath);
       }
     }
 
-    // For each file, find all blocker ancestors (transitive)
-    const blockerAncestors = new Map<string, Set<string>>();
-
-    const getBlockerAncestors = (path: string, visiting: Set<string>): Set<string> => {
-      if (blockerAncestors.has(path)) {
-        return blockerAncestors.get(path)!;
-      }
-      if (visiting.has(path)) {
-        return new Set(); // Cycle
-      }
-
-      const file = this.files.get(path);
-      if (!file) return new Set();
-
-      visiting.add(path);
-      const ancestors = new Set<string>();
-
-      // If this node itself is a blocker, add it
-      if (blockers.has(path)) {
-        ancestors.add(path);
-      }
-
-      // Add blocker ancestors from dependencies
-      for (const depPath of file.dependencies) {
-        if (depPath.startsWith('external:')) continue;
-
-        const depAncestors = getBlockerAncestors(depPath, visiting);
-        for (const a of depAncestors) {
-          ancestors.add(a);
-        }
-      }
-
-      blockerAncestors.set(path, ancestors);
-      visiting.delete(path);
-      return ancestors;
-    };
-
+    // Get current baseline: files already in clean subtrees
+    const currentlyMovable = new Set<string>();
     for (const file of this.files.values()) {
-      getBlockerAncestors(file.relativePath, new Set());
-    }
-
-    // For each blocker, count nodes where it's the ONLY blocker
-    const unlockMap = new Map<string, string[]>();
-
-    for (const [path, ancestors] of blockerAncestors.entries()) {
-      const file = this.files.get(path);
-      if (!file) continue;
-
-      // Only count clean/same-change files that are blocked
-      if (file.status !== 'clean' && file.status !== 'same-change') continue;
-
-      if (ancestors.size === 1) {
-        // This file has exactly one blocker - resolving that blocker unlocks this file
-        const [blockerId] = ancestors;
-        if (!unlockMap.has(blockerId)) {
-          unlockMap.set(blockerId, []);
-        }
-        unlockMap.get(blockerId)!.push(path);
+      if (file.isCleanSubtree) {
+        currentlyMovable.add(file.relativePath);
       }
     }
 
-    // Build bottleneck results
-    for (const blockerPath of blockers) {
-      const file = this.files.get(blockerPath);
+    // For each dirty node, simulate fixing it and count newly unlocked files
+    for (const dirtyPath of dirtyNodes) {
+      const file = this.files.get(dirtyPath);
       if (!file) continue;
 
-      const unlocked = unlockMap.get(blockerPath) || [];
-      const linesChanged = file.linesChanged || 1; // Default to 1 to avoid division by zero
+      // Simulate: what if this file were clean?
+      const newlyUnlocked = this.simulateFixAndCountUnlocked(dirtyPath, currentlyMovable);
 
-      // Impact score = files unlocked per line of change (higher = better ROI)
-      const impactScore = unlocked.length / linesChanged;
+      const linesChanged = file.linesChanged || this.estimateLinesChanged(file);
+
+      // Impact score = files unlocked per line of change
+      const impactScore = linesChanged > 0 ? newlyUnlocked.length / linesChanged : 0;
 
       bottlenecks.push({
-        relativePath: blockerPath,
+        relativePath: dirtyPath,
         status: file.status,
-        unlockCount: unlocked.length,
-        unlockedPaths: unlocked.slice(0, 10), // Sample
+        unlockCount: newlyUnlocked.length,
+        unlockedPaths: newlyUnlocked.slice(0, 10),
         linesChanged,
         impactScore,
       });
@@ -357,5 +320,97 @@ export class ReportAnalyzer {
     bottlenecks.sort((a, b) => b.impactScore - a.impactScore);
 
     return bottlenecks;
+  }
+
+  /**
+   * Simulate fixing a dirty node and return list of files that become movable
+   */
+  private simulateFixAndCountUnlocked(fixedPath: string, currentlyMovable: Set<string>): string[] {
+    const newlyUnlocked: string[] = [];
+
+    // Check each file that's currently NOT movable
+    for (const file of this.files.values()) {
+      if (currentlyMovable.has(file.relativePath)) continue;
+
+      // File must be clean/same-change to potentially become movable
+      if (file.status !== 'clean' && file.status !== 'same-change') continue;
+
+      // Check if this file would be in a clean subtree if fixedPath were clean
+      if (this.wouldBeCleanSubtreeIfFixed(file.relativePath, fixedPath, new Set())) {
+        newlyUnlocked.push(file.relativePath);
+      }
+    }
+
+    return newlyUnlocked;
+  }
+
+  /**
+   * Check if a file would be part of a clean subtree if fixedPath were fixed
+   */
+  private wouldBeCleanSubtreeIfFixed(
+    path: string,
+    fixedPath: string,
+    visiting: Set<string>
+  ): boolean {
+    if (visiting.has(path)) return false;
+
+    const file = this.files.get(path);
+    if (!file) return false;
+
+    // If this IS the fixed path, treat it as clean
+    if (path === fixedPath) return true;
+
+    // If it's already a clean subtree, it stays clean
+    if (file.isCleanSubtree) return true;
+
+    // Must be clean or same-change status
+    if (file.status !== 'clean' && file.status !== 'same-change') return false;
+
+    visiting.add(path);
+
+    // Check all dependencies
+    for (const depPath of file.dependencies) {
+      if (depPath.startsWith('external:')) continue;
+      if (!this.files.has(depPath)) continue;
+
+      const depFile = this.files.get(depPath)!;
+
+      // If dep is the fixed path, treat as clean
+      if (depPath === fixedPath) continue;
+
+      // If dep is already clean subtree, it's fine
+      if (depFile.isCleanSubtree) continue;
+
+      // If dep is dirty (not the fixed one), this file can't be unlocked
+      if (depFile.status !== 'clean' && depFile.status !== 'same-change') {
+        visiting.delete(path);
+        return false;
+      }
+
+      // Recursively check if dep would be clean subtree
+      if (!this.wouldBeCleanSubtreeIfFixed(depPath, fixedPath, visiting)) {
+        visiting.delete(path);
+        return false;
+      }
+    }
+
+    visiting.delete(path);
+    return true;
+  }
+
+  /**
+   * Estimate lines changed based on file status
+   */
+  private estimateLinesChanged(file: FileMatch): number {
+    // Default estimates based on status
+    switch (file.status) {
+      case 'conflict':
+        return 50; // Conflicts typically need more work
+      case 'retail-only':
+      case 'restaurant-only':
+        return 20; // One-sided, need to add/review
+      default:
+        return 10;
+    }
   }
 }

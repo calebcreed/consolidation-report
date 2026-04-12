@@ -6,6 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync, spawn, ChildProcess } from 'child_process';
+import { Project } from 'ts-morph';
 import { AnalysisReport, CleanSubtree } from '../report/types';
 
 export interface MigrationRecord {
@@ -16,7 +17,8 @@ export interface MigrationRecord {
   fromBranch: string;
   toBranch: string;
   status: 'pending' | 'migrated' | 'built' | 'rolled-back';
-  gitStashRef?: string;
+  commitHash?: string;        // Git commit hash for this migration
+  parentCommitHash?: string;  // Commit hash before this migration (for rollback)
 }
 
 export interface ServerConfig {
@@ -32,6 +34,8 @@ export interface ServerState {
   config: ServerConfig | null;
   report: AnalysisReport | null;
   migrations: MigrationRecord[];
+  redoStack: MigrationRecord[];  // Migrations that were undone (can redo)
+  currentCommit: string | null;   // Current HEAD commit hash
   currentBuild: {
     running: boolean;
     output: string[];
@@ -45,6 +49,8 @@ export class StateManager {
     config: null,
     report: null,
     migrations: [],
+    redoStack: [],
+    currentCommit: null,
     currentBuild: {
       running: false,
       output: [],
@@ -114,7 +120,11 @@ export class StateManager {
   }
 
   /**
-   * Migrate a subtree to shared
+   * Migrate a clean subtree to merged
+   *
+   * Key insight: Files in a clean subtree move TOGETHER, so their relative
+   * imports to each other stay unchanged. Only external files that import
+   * FROM the subtree need their imports updated.
    */
   async migrate(subtree: CleanSubtree): Promise<MigrationRecord> {
     const config = this.state.config;
@@ -127,70 +137,223 @@ export class StateManager {
       subtreeRoot: subtree.rootPath,
       files: subtree.files,
       fromBranch: config.restaurantBranch,
-      toBranch: 'shared',
+      toBranch: 'merged',
       status: 'pending',
     };
 
     try {
-      // Create a git stash point for rollback
-      const stashMessage = `consolidator-${id}`;
-      execSync(`git stash push -m "${stashMessage}" --include-untracked`, {
-        cwd: config.projectPath,
-        encoding: 'utf-8',
-      });
+      // Note: subtree.files are like "src/app/foo.ts", so srcDir/destDir should NOT include /src
+      const srcDir = path.join(config.projectPath, 'apps/restaurant');
+      const destDir = path.join(config.projectPath, 'apps/merged');
 
-      // Check if stash was created (might be empty if no changes)
-      const stashList = execSync('git stash list', {
-        cwd: config.projectPath,
-        encoding: 'utf-8',
-      });
+      this.emitOutput(`Migrating clean subtree: ${subtree.files.length} files`);
 
-      if (stashList.includes(stashMessage)) {
-        record.gitStashRef = 'stash@{0}';
-        // Pop it back - we just wanted the ref for safety
-        execSync('git stash pop', { cwd: config.projectPath });
+      // Load ts-morph project
+      this.emitOutput('Loading TypeScript project...');
+      const project = new Project({
+        tsConfigFilePath: config.tsconfigPath,
+        skipAddingFilesFromTsConfig: false,
+      });
+      project.addSourceFilesAtPaths(path.join(config.projectPath, 'apps', '**', 'src', '**', '*.ts'));
+      this.emitOutput(`Loaded ${project.getSourceFiles().length} source files`);
+
+      // Build set of files being migrated
+      const migratingFiles = new Set<string>();
+      const srcToDestMap = new Map<string, string>();
+
+      for (const file of subtree.files) {
+        const srcPath = path.join(srcDir, file);
+        const destPath = path.join(destDir, file);
+        migratingFiles.add(srcPath);
+        srcToDestMap.set(srcPath, destPath);
       }
 
-      // Move files to shared
-      for (const file of subtree.files) {
-        // file is relativePath like "src/app/utils/foo.ts"
-        // Source is in apps/restaurant/src/, so we need apps/restaurant/ + file
-        const srcPath = path.join(config.projectPath, 'apps/restaurant', file);
-        const destPath = path.join(config.projectPath, config.sharedPath, file);
+      // Find external files that import from our subtree
+      const externalDependents: Map<any, Set<string>> = new Map();
 
-        if (fs.existsSync(srcPath)) {
-          // Create destination directory
-          const destDir = path.dirname(destPath);
-          if (!fs.existsSync(destDir)) {
-            fs.mkdirSync(destDir, { recursive: true });
-          }
+      for (const sf of project.getSourceFiles()) {
+        const sfPath = sf.getFilePath();
+        if (migratingFiles.has(sfPath)) continue;
 
-          // Move file using git mv for proper tracking
-          try {
-            execSync(`git mv "${srcPath}" "${destPath}"`, {
-              cwd: config.projectPath,
-              encoding: 'utf-8',
-            });
-            this.emitOutput(`Moved: ${file}`);
-          } catch (e) {
-            // If git mv fails, try regular move
-            fs.renameSync(srcPath, destPath);
-            this.emitOutput(`Moved (non-git): ${file}`);
+        for (const imp of sf.getImportDeclarations()) {
+          const resolved = imp.getModuleSpecifierSourceFile();
+          if (resolved && migratingFiles.has(resolved.getFilePath())) {
+            if (!externalDependents.has(sf)) {
+              externalDependents.set(sf, new Set());
+            }
+            externalDependents.get(sf)!.add(resolved.getFilePath());
           }
         }
       }
 
+      this.emitOutput(`Found ${externalDependents.size} external files that import from this subtree`);
+
+      // Create destination directories
+      for (const file of subtree.files) {
+        const destPath = path.join(destDir, file);
+        const destDirPath = path.dirname(destPath);
+        if (!fs.existsSync(destDirPath)) {
+          fs.mkdirSync(destDirPath, { recursive: true });
+        }
+      }
+
+      // Move all files in the subtree together
+      // Since they move together, relative imports between them stay unchanged
+      this.emitOutput('Moving files...');
+      for (const file of subtree.files) {
+        const srcPath = path.join(srcDir, file);
+        const destPath = path.join(destDir, file);
+
+        const sourceFile = project.getSourceFile(srcPath);
+        if (sourceFile) {
+          sourceFile.move(destPath);
+          this.emitOutput(`  Moved: ${file}`);
+        }
+      }
+
+      // Update imports WITHIN moved files that point to files already in merged
+      // (e.g., godzilla.ts had '../../../../merged/src/app/tokyo' when tokyo migrated earlier,
+      //  now godzilla is in merged too, so it should be './tokyo')
+      this.emitOutput('Updating imports within moved files...');
+      for (const file of subtree.files) {
+        const destPath = path.join(destDir, file);
+        const movedFile = project.getSourceFile(destPath);
+        if (!movedFile) continue;
+
+        for (const imp of movedFile.getImportDeclarations()) {
+          const resolved = imp.getModuleSpecifierSourceFile();
+          if (!resolved) continue;
+
+          const resolvedPath = resolved.getFilePath();
+          // Check if this import points to a file in merged
+          if (resolvedPath.startsWith(destDir)) {
+            const oldSpecifier = imp.getModuleSpecifierValue();
+
+            // Calculate new relative path from this file's new location
+            const movedFileDir = path.dirname(destPath);
+            let newPath = path.relative(movedFileDir, resolvedPath);
+            newPath = newPath.replace(/\.ts$/, '');
+            if (!newPath.startsWith('.')) {
+              newPath = './' + newPath;
+            }
+
+            // Only update if it changed
+            if (oldSpecifier !== newPath) {
+              this.emitOutput(`  ${path.basename(file)}: "${oldSpecifier}" → "${newPath}"`);
+              imp.setModuleSpecifier(newPath);
+            }
+          }
+        }
+      }
+
+      // Update imports in external files to point to merged
+      this.emitOutput('Updating imports in external files...');
+      for (const [extFile, _] of externalDependents) {
+        for (const imp of extFile.getImportDeclarations()) {
+          const resolved = imp.getModuleSpecifierSourceFile();
+          if (!resolved) continue;
+
+          const resolvedPath = resolved.getFilePath();
+          const originalSrcPath = resolvedPath.replace(destDir, srcDir);
+          const destPath = srcToDestMap.get(originalSrcPath) || srcToDestMap.get(resolvedPath);
+
+          if (destPath && resolved.getFilePath() === destPath) {
+            const oldSpecifier = imp.getModuleSpecifierValue();
+
+            // Calculate new relative path from external file to merged location
+            const extFileDir = path.dirname(extFile.getFilePath());
+            let newPath = path.relative(extFileDir, destPath);
+            newPath = newPath.replace(/\.ts$/, '');
+            if (!newPath.startsWith('.')) {
+              newPath = './' + newPath;
+            }
+
+            this.emitOutput(`  ${extFile.getBaseName()}: "${oldSpecifier}" → "${newPath}"`);
+            imp.setModuleSpecifier(newPath);
+          }
+        }
+      }
+
+      // Save all changes
+      this.emitOutput('Saving changes...');
+      await project.save();
+
+      // Delete original files
+      for (const file of subtree.files) {
+        const srcPath = path.join(srcDir, file);
+        if (fs.existsSync(srcPath)) {
+          fs.unlinkSync(srcPath);
+        }
+      }
+
+      // Clean up empty directories
+      for (const file of subtree.files) {
+        const srcPath = path.join(srcDir, file);
+        let dir = path.dirname(srcPath);
+        while (dir !== srcDir && dir.startsWith(srcDir)) {
+          try {
+            const contents = fs.readdirSync(dir);
+            if (contents.length === 0) {
+              fs.rmdirSync(dir);
+              this.emitOutput(`  Removed empty directory: ${path.relative(srcDir, dir)}`);
+            } else {
+              break;
+            }
+            dir = path.dirname(dir);
+          } catch {
+            break;
+          }
+        }
+      }
+
+      // Get current commit hash (before migration)
+      const parentHash = execSync('git rev-parse HEAD', {
+        cwd: config.projectPath,
+        encoding: 'utf-8',
+      }).trim();
+      record.parentCommitHash = parentHash;
+
+      // Stage all changes in git
+      this.emitOutput('Staging changes in git...');
+      execSync('git add -A', {
+        cwd: config.projectPath,
+        encoding: 'utf-8',
+      });
+
+      // Create commit for this migration
+      const commitMsg = `[consolidator] Migrate ${subtree.rootPath} (${subtree.files.length} files)`;
+      execSync(`git commit -m "${commitMsg}"`, {
+        cwd: config.projectPath,
+        encoding: 'utf-8',
+      });
+
+      // Get the new commit hash
+      const commitHash = execSync('git rev-parse HEAD', {
+        cwd: config.projectPath,
+        encoding: 'utf-8',
+      }).trim();
+      record.commitHash = commitHash;
+
       record.status = 'migrated';
       this.state.migrations.push(record);
+      this.state.currentCommit = commitHash;
+
+      // Clear redo stack - new migration invalidates any "future" that was undone
+      if (this.state.redoStack.length > 0) {
+        this.emitOutput(`Clearing ${this.state.redoStack.length} redo entries (new timeline branch)`);
+        this.state.redoStack = [];
+      }
+
       this.emitOutput(`Migration complete: ${subtree.files.length} files moved`);
+      this.emitOutput(`Commit: ${commitHash.substring(0, 8)}`);
 
       return record;
     } catch (e: any) {
       record.status = 'rolled-back';
       this.state.lastError = e.message;
       this.emitOutput(`Migration error: ${e.message}`);
-      if (e.stderr) {
-        this.emitOutput(`stderr: ${e.stderr}`);
+      if (e.stack) {
+        this.emitOutput(e.stack);
       }
       throw e;
     }
@@ -264,45 +427,149 @@ export class StateManager {
   }
 
   /**
-   * Rollback the last migration
+   * Rollback to a specific migration (or before it)
+   * @param migrationId - The migration ID to rollback to (rolls back this and all after)
+   *                      If not provided, rolls back just the last migration
    */
-  async rollback(): Promise<void> {
+  /**
+   * Rollback (undo) to a specific migration point
+   * Rolled-back migrations go to the redo stack
+   */
+  async rollback(migrationId?: string): Promise<{ rolledBack: MigrationRecord[] }> {
     const config = this.state.config;
     if (!config) throw new Error('No config set');
 
-    const lastMigration = this.state.migrations[this.state.migrations.length - 1];
-    if (!lastMigration || lastMigration.status === 'rolled-back') {
-      throw new Error('No migration to rollback');
+    const activeMigrations = this.state.migrations.filter(m => m.status !== 'rolled-back');
+    if (activeMigrations.length === 0) {
+      throw new Error('No migrations to rollback');
     }
 
-    this.emitOutput(`Rolling back migration: ${lastMigration.subtreeRoot}`);
+    // Find the migration to rollback to
+    let targetIndex: number;
+    if (migrationId) {
+      targetIndex = activeMigrations.findIndex(m => m.id === migrationId);
+      if (targetIndex === -1) {
+        throw new Error(`Migration ${migrationId} not found`);
+      }
+    } else {
+      targetIndex = activeMigrations.length - 1;
+    }
+
+    const targetMigration = activeMigrations[targetIndex];
+    const migrationsToRollback = activeMigrations.slice(targetIndex);
+
+    this.emitOutput(`Rolling back ${migrationsToRollback.length} migration(s) to before: ${targetMigration.subtreeRoot}`);
 
     try {
-      // Reset any staged changes
-      execSync('git reset HEAD', {
+      // Get the parent commit hash (state before the target migration)
+      const targetCommit = targetMigration.parentCommitHash;
+      if (!targetCommit) {
+        throw new Error('Migration has no parent commit hash - cannot rollback');
+      }
+
+      this.emitOutput(`Resetting to commit: ${targetCommit.substring(0, 8)}`);
+
+      // Hard reset to the parent commit
+      execSync(`git reset --hard ${targetCommit}`, {
         cwd: config.projectPath,
         encoding: 'utf-8',
       });
 
-      // Restore any modified/deleted tracked files
-      execSync('git checkout HEAD -- .', {
-        cwd: config.projectPath,
-        encoding: 'utf-8',
-      });
+      // Mark migrations as rolled-back and add to redo stack (in reverse order for correct redo)
+      for (const m of migrationsToRollback) {
+        m.status = 'rolled-back';
+      }
 
-      // Clean up any untracked files/directories that were created
-      execSync('git clean -fd', {
-        cwd: config.projectPath,
-        encoding: 'utf-8',
-      });
+      // Add to redo stack in reverse order (so first to redo is at the end)
+      this.state.redoStack = [...migrationsToRollback.slice().reverse(), ...this.state.redoStack];
+      this.state.currentCommit = targetCommit;
 
-      lastMigration.status = 'rolled-back';
-      this.emitOutput('Rollback complete');
+      this.emitOutput(`Rollback complete - ${migrationsToRollback.length} migration(s) undone`);
+      this.emitOutput(`Redo stack now has ${this.state.redoStack.length} migration(s)`);
+      return { rolledBack: migrationsToRollback };
     } catch (e: any) {
       this.state.lastError = e.message;
       this.emitOutput(`Rollback error: ${e.message}`);
       throw e;
     }
+  }
+
+  /**
+   * Fast-forward (redo) to a specific migration
+   * Re-applies migrations from the redo stack
+   */
+  async fastForward(migrationId?: string): Promise<{ redone: MigrationRecord[] }> {
+    const config = this.state.config;
+    if (!config) throw new Error('No config set');
+
+    if (this.state.redoStack.length === 0) {
+      throw new Error('Nothing to redo');
+    }
+
+    // Find how many migrations to redo
+    let targetIndex: number;
+    if (migrationId) {
+      targetIndex = this.state.redoStack.findIndex(m => m.id === migrationId);
+      if (targetIndex === -1) {
+        throw new Error(`Migration ${migrationId} not found in redo stack`);
+      }
+    } else {
+      // Just redo the most recent one (last in stack = first undone)
+      targetIndex = this.state.redoStack.length - 1;
+    }
+
+    // Get migrations to redo (from end of stack up to and including target)
+    const migrationsToRedo = this.state.redoStack.slice(targetIndex);
+
+    this.emitOutput(`Redoing ${migrationsToRedo.length} migration(s)`);
+
+    try {
+      // The target commit is the commitHash of the last migration to redo
+      const targetMigration = migrationsToRedo[0]; // First in slice = furthest forward
+      const targetCommit = targetMigration.commitHash;
+
+      if (!targetCommit) {
+        throw new Error('Migration has no commit hash - cannot redo');
+      }
+
+      this.emitOutput(`Fast-forwarding to commit: ${targetCommit.substring(0, 8)}`);
+
+      // Hard reset to the target commit
+      execSync(`git reset --hard ${targetCommit}`, {
+        cwd: config.projectPath,
+        encoding: 'utf-8',
+      });
+
+      // Mark migrations as active again and remove from redo stack
+      for (const m of migrationsToRedo) {
+        m.status = 'migrated';
+      }
+
+      // Remove redone migrations from redo stack
+      this.state.redoStack = this.state.redoStack.slice(0, targetIndex);
+      this.state.currentCommit = targetCommit;
+
+      this.emitOutput(`Redo complete - ${migrationsToRedo.length} migration(s) restored`);
+      return { redone: migrationsToRedo };
+    } catch (e: any) {
+      this.state.lastError = e.message;
+      this.emitOutput(`Redo error: ${e.message}`);
+      throw e;
+    }
+  }
+
+  /**
+   * Get active (non-rolled-back) migrations
+   */
+  getActiveMigrations(): MigrationRecord[] {
+    return this.state.migrations.filter(m => m.status !== 'rolled-back');
+  }
+
+  /**
+   * Get redo stack
+   */
+  getRedoStack(): MigrationRecord[] {
+    return this.state.redoStack;
   }
 
   /**

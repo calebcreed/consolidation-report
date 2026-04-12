@@ -18,14 +18,10 @@ export interface FileMatch {
   restaurantPath: string | null;
   status: FileStatus;
   diff: DiffResult;
+  unifiedDiff?: string;      // Git-style unified diff (retail vs restaurant)
   isCleanSubtree: boolean;
   dependencies: string[];    // relativePaths this file depends on
   dependents: string[];      // relativePaths that depend on this file
-  // Optional unified diff text for display
-  diffText?: {
-    retail: string;      // Retail vs base diff
-    restaurant: string;  // Restaurant vs base diff
-  };
   // Lines changed (for impact score calculation)
   linesChanged?: number;
 }

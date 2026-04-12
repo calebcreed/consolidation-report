@@ -131,14 +131,11 @@ function createMockFileMatches(graph: import('./deps/graph').DependencyGraph): F
       })
       .filter((p, i, arr) => arr.indexOf(p) === i);
 
-    // Generate sample diff text for conflicts
-    let diffText: { retail: string; restaurant: string } | undefined;
+    // Generate sample unified diff for conflicts
+    let unifiedDiff: string | undefined;
     if (status === 'conflict') {
       const filename = relativePath.split('/').pop() || 'file.ts';
-      diffText = {
-        retail: generateSampleDiff(filename, 'retail'),
-        restaurant: generateSampleDiff(filename, 'restaurant'),
-      };
+      unifiedDiff = generateSampleUnifiedDiff(relativePath);
     }
 
     // Generate mock lines changed for non-clean files
@@ -161,10 +158,10 @@ function createMockFileMatches(graph: import('./deps/graph').DependencyGraph): F
       restaurantPath: filePath,
       status,
       diff: status === 'clean' ? { status: 'identical' } : { status: 'dirty', changes: [] },
+      unifiedDiff,
       isCleanSubtree: false, // Will be computed by analyzer
       dependencies,
       dependents,
-      diffText,
       linesChanged,
     });
   }
@@ -186,39 +183,27 @@ function simpleHash(str: string): number {
 }
 
 /**
- * Generate sample unified diff for demo purposes
+ * Generate sample unified diff for demo purposes (retail vs restaurant)
  */
-function generateSampleDiff(filename: string, branch: 'retail' | 'restaurant'): string {
-  if (branch === 'retail') {
-    return `--- a/${filename}
-+++ b/${filename}
-@@ -10,7 +10,9 @@ export class SomeService {
+function generateSampleUnifiedDiff(relativePath: string): string {
+  const filename = relativePath.split('/').pop() || 'file.ts';
+  return `--- retail/${relativePath}
++++ restaurant/${relativePath}
+@@ -10,9 +10,11 @@ export class SomeService {
    constructor(private http: HttpClient) {}
 
    getData(): Observable<Data> {
--    return this.http.get<Data>('/api/data');
-+    // Added retail-specific caching
-+    return this.http.get<Data>('/api/data').pipe(
-+      shareReplay(1)
-+    );
-   }
- }`;
-  } else {
-    return `--- a/${filename}
-+++ b/${filename}
-@@ -10,7 +10,10 @@ export class SomeService {
-   constructor(private http: HttpClient) {}
-
-   getData(): Observable<Data> {
--    return this.http.get<Data>('/api/data');
-+    // Added restaurant-specific error handling
+-    // Retail implementation with caching
+-    return this.http.get<Data>('/api/data').pipe(
+-      shareReplay(1)
+-    );
++    // Restaurant implementation with error handling
 +    return this.http.get<Data>('/api/data').pipe(
 +      retry(3),
 +      catchError(this.handleError)
 +    );
    }
  }`;
-  }
 }
 
 main().catch(err => {
