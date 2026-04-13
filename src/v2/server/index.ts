@@ -33,11 +33,30 @@ const semanticComparator = new SemanticComparator();
  * - conflict: Real semantic differences
  * - retail-only / restaurant-only: File exists in only one branch
  */
+/**
+ * Count changed lines in a unified diff (lines starting with + or -)
+ */
+function countChangedLines(unifiedDiff: string): number {
+  let count = 0;
+  const lines = unifiedDiff.split('\n');
+  for (const line of lines) {
+    // Skip headers (---, +++, @@)
+    if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('@@')) {
+      continue;
+    }
+    // Count added and removed lines
+    if (line.startsWith('+') || line.startsWith('-')) {
+      count++;
+    }
+  }
+  return count;
+}
+
 function compareFiles(
   retailPath: string | null,
   restaurantPath: string | null,
   relativePath: string
-): { status: FileStatus; diff: DiffResult; unifiedDiff: string } {
+): { status: FileStatus; diff: DiffResult; unifiedDiff: string; linesChanged: number } {
   // One-sided cases
   if (!retailPath || !fs.existsSync(retailPath)) {
     const restaurantContent = fs.readFileSync(restaurantPath!, 'utf-8');
@@ -52,7 +71,8 @@ function compareFiles(
     return {
       status: 'restaurant-only',
       diff: { status: 'dirty', changes: [] },
-      unifiedDiff
+      unifiedDiff,
+      linesChanged: restaurantContent.split('\n').length
     };
   }
   if (!restaurantPath || !fs.existsSync(restaurantPath)) {
@@ -68,7 +88,8 @@ function compareFiles(
     return {
       status: 'retail-only',
       diff: { status: 'dirty', changes: [] },
-      unifiedDiff
+      unifiedDiff,
+      linesChanged: retailContent.split('\n').length
     };
   }
 
@@ -86,6 +107,9 @@ function compareFiles(
     '',
     ''
   );
+
+  // Count actual changed lines
+  const linesChanged = countChangedLines(unifiedDiff);
 
   // Map diff result to file status
   let status: FileStatus;
@@ -107,7 +131,7 @@ function compareFiles(
       status = 'conflict';
   }
 
-  return { status, diff: diffResult, unifiedDiff };
+  return { status, diff: diffResult, unifiedDiff, linesChanged };
 }
 
 /**
@@ -221,7 +245,7 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
       const restaurantPath = restaurantFiles.get(relativePath) || null;
 
       // Compare files
-      const { status, diff, unifiedDiff } = compareFiles(retailPath, restaurantPath, relativePath);
+      const { status, diff, unifiedDiff, linesChanged } = compareFiles(retailPath, restaurantPath, relativePath);
 
       // Track stats
       if (status === 'clean') cleanCount++;
@@ -258,6 +282,7 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
         status,
         diff,
         unifiedDiff,
+        linesChanged,
         isCleanSubtree: false,
         dependencies,
         dependents,

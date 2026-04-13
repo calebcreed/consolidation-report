@@ -824,28 +824,67 @@ export function generateInteractiveHtml(report: AnalysisReport | null, config: S
       const bottlenecksList = document.getElementById('bottlenecks-list');
 
       if (!REPORT.bottlenecks || REPORT.bottlenecks.length === 0) {
-        bottlenecksList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔓</div><div>No dirty files found.</div></div>';
+        bottlenecksList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔓</div><div>No bottlenecks found. Either all files are clean or no dirty files block clean files.</div></div>';
         return;
       }
 
       // Show all bottlenecks, sorted by impact score (already sorted by server)
       bottlenecksList.innerHTML = REPORT.bottlenecks.map((b, i) => {
-        const badgeClass = b.unlockCount > 0 ? 'badge-green' : 'badge-purple';
         const impactBadge = b.impactScore > 0
           ? \`<span class="badge badge-blue">Score: \${b.impactScore.toFixed(2)}</span>\`
           : '';
-        return \`
-          <div class="list-item">
-            <span class="badge \${badgeClass}">Unlocks \${b.unlockCount}</span>
-            \${impactBadge}
-            <span class="badge">\${b.linesChanged || '?'} lines</span>
-            <div class="list-item-content">
-              <div class="list-item-path">\${b.relativePath}</div>
-              <div class="list-item-meta">\${b.status}\${b.unlockedPaths && b.unlockedPaths.length > 0 ? ' · Would unlock: ' + b.unlockedPaths.slice(0, 3).join(', ') : ''}</div>
+
+        // Find the file to get its diff
+        const file = REPORT.files.find(f => f.relativePath === b.relativePath);
+        const unifiedDiff = file?.unifiedDiff || '';
+        let diffHtml = '';
+
+        if (unifiedDiff) {
+          const lines = unifiedDiff.split('\\n');
+          const diffLines = lines.map(line => {
+            let lineClass = 'context';
+            if (line.startsWith('+') && !line.startsWith('+++')) lineClass = 'added';
+            else if (line.startsWith('-') && !line.startsWith('---')) lineClass = 'removed';
+            else if (line.startsWith('@@')) lineClass = 'hunk';
+            else if (line.startsWith('---') || line.startsWith('+++')) lineClass = 'header';
+            return \`<div class="diff-line \${lineClass}">\${escapeHtml(line)}</div>\`;
+          }).join('');
+
+          diffHtml = \`
+            <div class="diff-container">
+              <div class="diff-header">
+                <span>retail vs restaurant</span>
+              </div>
+              <div class="diff-content">\${diffLines}</div>
             </div>
+          \`;
+        }
+
+        const statusBadge = b.status === 'conflict' ? 'badge-conflict' :
+                           b.status === 'retail-only' ? 'badge-retail' : 'badge-restaurant';
+
+        return \`
+          <div class="file-expanded">
+            <div class="list-item">
+              <span class="badge badge-green">Unlocks \${b.unlockCount}</span>
+              \${impactBadge}
+              <span class="badge">\${b.linesChanged} lines</span>
+              <span class="badge \${statusBadge}">\${b.status}</span>
+              <div class="list-item-content">
+                <div class="list-item-path">\${b.relativePath}</div>
+                <div class="list-item-meta">\${b.unlockedPaths && b.unlockedPaths.length > 0 ? 'Would unlock: ' + b.unlockedPaths.slice(0, 3).join(', ') + (b.unlockCount > 3 ? '...' : '') : ''}</div>
+              </div>
+              <button class="btn btn-small" onclick="toggleBottleneckDiff(\${i})">Diff</button>
+            </div>
+            <div id="bottleneck-diff-\${i}" style="display: none;">\${diffHtml}</div>
           </div>
         \`;
       }).join('');
+    }
+
+    function toggleBottleneckDiff(index) {
+      const diffEl = document.getElementById('bottleneck-diff-' + index);
+      diffEl.style.display = diffEl.style.display === 'none' ? 'block' : 'none';
     }
 
     // D3.js Force-Directed Graph

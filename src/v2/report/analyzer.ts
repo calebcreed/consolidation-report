@@ -316,10 +316,11 @@ export class ReportAnalyzer {
       });
     }
 
+    // Filter out bottlenecks that unlock nothing (not interesting)
     // Sort by impactScore descending (best bang for buck first)
-    bottlenecks.sort((a, b) => b.impactScore - a.impactScore);
-
-    return bottlenecks;
+    return bottlenecks
+      .filter(b => b.unlockCount > 0)
+      .sort((a, b) => b.impactScore - a.impactScore);
   }
 
   /**
