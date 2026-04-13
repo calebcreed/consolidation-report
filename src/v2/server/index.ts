@@ -190,25 +190,31 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
     broadcast({ type: 'output', data: `  Found ${restaurantFiles.size} files in restaurant` });
 
     // Build dependency graph from restaurant (primary branch)
+    broadcast({ type: 'output', data: `Building dependency graph (this may take a few minutes on large projects)...` });
+    const graphStartTime = Date.now();
     const builder = GraphBuilder.fromTsconfig(config.tsconfigPath);
     const graph = await builder.build(restaurantSrcDir, {
       include: ['**/*.ts'],
       exclude: ['**/*.spec.ts', '**/*.test.ts', '**/node_modules/**'],
     });
 
+    const graphTime = ((Date.now() - graphStartTime) / 1000).toFixed(1);
     const graphStats = graph.getStats();
-    broadcast({ type: 'output', data: `Built dependency graph: ${graphStats.totalFiles} files, ${graphStats.totalEdges} dependencies` });
+    broadcast({ type: 'output', data: `Built dependency graph in ${graphTime}s: ${graphStats.totalFiles} files, ${graphStats.totalEdges} dependencies` });
 
     // Collect all unique relative paths from both branches
     const allPaths = new Set<string>();
     for (const rp of retailFiles.keys()) allPaths.add(rp);
     for (const rp of restaurantFiles.keys()) allPaths.add(rp);
 
-    broadcast({ type: 'output', data: `Comparing ${allPaths.size} unique files...` });
+    const totalFiles = allPaths.size;
+    broadcast({ type: 'output', data: `Comparing ${totalFiles} unique files...` });
 
     // Create file matches with real comparison
     const fileMatches: FileMatch[] = [];
     let cleanCount = 0, conflictCount = 0, retailOnlyCount = 0, restaurantOnlyCount = 0;
+    let processed = 0;
+    const progressInterval = Math.max(1, Math.floor(totalFiles / 20)); // Update ~20 times
 
     for (const relativePath of allPaths) {
       const retailPath = retailFiles.get(relativePath) || null;
@@ -222,6 +228,13 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
       else if (status === 'conflict') conflictCount++;
       else if (status === 'retail-only') retailOnlyCount++;
       else if (status === 'restaurant-only') restaurantOnlyCount++;
+
+      // Progress update
+      processed++;
+      if (processed % progressInterval === 0 || processed === totalFiles) {
+        const pct = Math.round((processed / totalFiles) * 100);
+        broadcast({ type: 'output', data: `Comparing files: ${processed}/${totalFiles} (${pct}%) - ${cleanCount} clean, ${conflictCount} conflicts` });
+      }
 
       // Get dependencies from graph (if file exists in restaurant)
       const graphPath = restaurantPath || retailPath;
