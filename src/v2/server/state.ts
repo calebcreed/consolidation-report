@@ -212,10 +212,11 @@ export class StateManager {
       }
 
       // Update imports WITHIN moved files:
-      // 1. Imports pointing to files in merged → relative path within merged
-      // 2. Imports pointing to files still in restaurant/retail → relative path back to source
-      // 3. Path aliases (@app/*, etc.) that resolve to non-migrated files → relative path
-      this.emitOutput('Updating imports within moved files...');
+      // - ts-morph's move() handles relative imports automatically
+      // - Path alias imports to other migrating files should become relative paths
+      //   (since path aliases may not work from merged location)
+      // - Files with deps to non-migrating files shouldn't be here (dependency detection prevents it)
+      this.emitOutput('Updating path alias imports within moved files...');
       for (const file of subtree.files) {
         const destPath = path.join(destDir, file);
         const movedFile = project.getSourceFile(destPath);
@@ -224,48 +225,36 @@ export class StateManager {
         for (const imp of movedFile.getImportDeclarations()) {
           const oldSpecifier = imp.getModuleSpecifierValue();
 
-          // Skip node_modules imports
-          if (!oldSpecifier.startsWith('.') && !oldSpecifier.startsWith('@app') && !oldSpecifier.startsWith('@env') && !oldSpecifier.startsWith('@core')) {
+          // Skip relative imports (ts-morph already handled these) and npm packages
+          if (oldSpecifier.startsWith('.') || oldSpecifier.startsWith('/')) {
             continue;
           }
 
+          // Skip known external packages
+          if (oldSpecifier.startsWith('@angular/') ||
+              oldSpecifier.startsWith('@ngrx/') ||
+              oldSpecifier.startsWith('@ionic/') ||
+              oldSpecifier.startsWith('@capacitor/') ||
+              oldSpecifier.startsWith('rxjs') ||
+              !oldSpecifier.startsWith('@')) {
+            continue;
+          }
+
+          // This is a path alias import - resolve and convert to relative if target is in merged
           const resolved = imp.getModuleSpecifierSourceFile();
           if (!resolved) continue;
 
           const resolvedPath = resolved.getFilePath();
           const movedFileDir = path.dirname(destPath);
 
-          // Check if target is being migrated (will be in merged)
-          const isTargetMigrating = migratingFiles.has(resolvedPath.replace(destDir, srcDir)) ||
-                                    migratingFiles.has(resolvedPath);
-
-          // Check if target is in merged (already migrated or being migrated)
-          const isInMerged = resolvedPath.startsWith(destDir);
-
-          // Check if target is in restaurant/retail (not migrated)
-          const isInRestaurant = resolvedPath.includes('/apps/restaurant/');
-          const isInRetail = resolvedPath.includes('/apps/retail/');
-
-          let newPath: string | null = null;
-
-          if (isInMerged || isTargetMigrating) {
-            // Target is in merged - use relative path within merged
-            const targetInMerged = isTargetMigrating
-              ? resolvedPath.replace(srcDir, destDir)
-              : resolvedPath;
-            newPath = path.relative(movedFileDir, targetInMerged);
-          } else if (isInRestaurant || isInRetail) {
-            // Target is still in restaurant/retail - use relative path back to source
-            newPath = path.relative(movedFileDir, resolvedPath);
-          }
-
-          if (newPath) {
+          // Check if target is in merged (moved with us or previously migrated)
+          if (resolvedPath.startsWith(destDir)) {
+            let newPath = path.relative(movedFileDir, resolvedPath);
             newPath = newPath.replace(/\.ts$/, '');
             if (!newPath.startsWith('.')) {
               newPath = './' + newPath;
             }
 
-            // Only update if it changed
             if (oldSpecifier !== newPath) {
               this.emitOutput(`  ${path.basename(file)}: "${oldSpecifier}" → "${newPath}"`);
               imp.setModuleSpecifier(newPath);

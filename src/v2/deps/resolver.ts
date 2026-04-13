@@ -237,10 +237,16 @@ export class PathResolver {
 
   /**
    * Resolve using path aliases
+   *
+   * IMPORTANT: TypeScript path mappings are ALWAYS relative to baseUrl.
+   * If baseUrl is not set, they're relative to the tsconfig directory.
    */
   private resolvePathAlias(specifier: string): ResolvedPath | null {
     const match = this.matchPathAlias(specifier);
     if (!match) return null;
+
+    // Path mappings are relative to baseUrl (or rootDir if baseUrl is not set)
+    const basePath = this.baseUrl || this.rootDir;
 
     // Try each mapping
     for (const mapping of match.paths) {
@@ -249,10 +255,10 @@ export class PathResolver {
       if (mapping.endsWith('/*')) {
         // Wildcard mapping - substitute suffix
         const baseMapping = mapping.slice(0, -2);
-        targetPath = path.join(this.rootDir, baseMapping, match.suffix);
+        targetPath = path.join(basePath, baseMapping, match.suffix);
       } else {
         // Exact mapping
-        targetPath = path.join(this.rootDir, mapping);
+        targetPath = path.join(basePath, mapping);
         if (match.suffix) {
           targetPath = path.join(targetPath, match.suffix);
         }
