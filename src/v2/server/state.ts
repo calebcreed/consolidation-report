@@ -211,9 +211,10 @@ export class StateManager {
         }
       }
 
-      // Update imports WITHIN moved files that point to files already in merged
-      // (e.g., godzilla.ts had '../../../../merged/src/app/tokyo' when tokyo migrated earlier,
-      //  now godzilla is in merged too, so it should be './tokyo')
+      // Update imports WITHIN moved files:
+      // 1. Imports pointing to files in merged → relative path within merged
+      // 2. Imports pointing to files still in restaurant/retail → relative path back to source
+      // 3. Path aliases (@app/*, etc.) that resolve to non-migrated files → relative path
       this.emitOutput('Updating imports within moved files...');
       for (const file of subtree.files) {
         const destPath = path.join(destDir, file);
@@ -221,17 +222,44 @@ export class StateManager {
         if (!movedFile) continue;
 
         for (const imp of movedFile.getImportDeclarations()) {
+          const oldSpecifier = imp.getModuleSpecifierValue();
+
+          // Skip node_modules imports
+          if (!oldSpecifier.startsWith('.') && !oldSpecifier.startsWith('@app') && !oldSpecifier.startsWith('@env') && !oldSpecifier.startsWith('@core')) {
+            continue;
+          }
+
           const resolved = imp.getModuleSpecifierSourceFile();
           if (!resolved) continue;
 
           const resolvedPath = resolved.getFilePath();
-          // Check if this import points to a file in merged
-          if (resolvedPath.startsWith(destDir)) {
-            const oldSpecifier = imp.getModuleSpecifierValue();
+          const movedFileDir = path.dirname(destPath);
 
-            // Calculate new relative path from this file's new location
-            const movedFileDir = path.dirname(destPath);
-            let newPath = path.relative(movedFileDir, resolvedPath);
+          // Check if target is being migrated (will be in merged)
+          const isTargetMigrating = migratingFiles.has(resolvedPath.replace(destDir, srcDir)) ||
+                                    migratingFiles.has(resolvedPath);
+
+          // Check if target is in merged (already migrated or being migrated)
+          const isInMerged = resolvedPath.startsWith(destDir);
+
+          // Check if target is in restaurant/retail (not migrated)
+          const isInRestaurant = resolvedPath.includes('/apps/restaurant/');
+          const isInRetail = resolvedPath.includes('/apps/retail/');
+
+          let newPath: string | null = null;
+
+          if (isInMerged || isTargetMigrating) {
+            // Target is in merged - use relative path within merged
+            const targetInMerged = isTargetMigrating
+              ? resolvedPath.replace(srcDir, destDir)
+              : resolvedPath;
+            newPath = path.relative(movedFileDir, targetInMerged);
+          } else if (isInRestaurant || isInRetail) {
+            // Target is still in restaurant/retail - use relative path back to source
+            newPath = path.relative(movedFileDir, resolvedPath);
+          }
+
+          if (newPath) {
             newPath = newPath.replace(/\.ts$/, '');
             if (!newPath.startsWith('.')) {
               newPath = './' + newPath;
