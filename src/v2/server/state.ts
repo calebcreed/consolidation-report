@@ -188,6 +188,51 @@ export class StateManager {
 
       this.emitOutput(`Found ${externalDependents.size} external files that import from this subtree`);
 
+      // SAFETY CHECK: Verify no file in subtree imports from restaurant/retail (outside subtree)
+      // This catches dependency detection failures before we corrupt the codebase
+      this.emitOutput('Validating subtree has no external dependencies...');
+      const validationErrors: string[] = [];
+
+      for (const file of subtree.files) {
+        const srcPath = path.join(srcDir, file);
+        const sourceFile = project.getSourceFile(srcPath);
+        if (!sourceFile) continue;
+
+        for (const imp of sourceFile.getImportDeclarations()) {
+          const specifier = imp.getModuleSpecifierValue();
+          const resolved = imp.getModuleSpecifierSourceFile();
+
+          if (!resolved) continue;
+
+          const resolvedPath = resolved.getFilePath();
+
+          // Skip if target is in the migration set
+          if (migratingFiles.has(resolvedPath)) continue;
+
+          // Skip if target is already in merged
+          if (resolvedPath.startsWith(destDir)) continue;
+
+          // Skip external packages
+          if (resolvedPath.includes('node_modules')) continue;
+
+          // This import points to restaurant/retail but target is NOT migrating - BAD!
+          if (resolvedPath.includes('/apps/restaurant/') || resolvedPath.includes('/apps/retail/')) {
+            validationErrors.push(`${path.basename(file)}: imports "${specifier}" -> ${path.basename(resolvedPath)} (NOT in migration set)`);
+          }
+        }
+      }
+
+      if (validationErrors.length > 0) {
+        this.emitOutput('');
+        this.emitOutput('ERROR: Cannot migrate - subtree has dependencies outside the migration set:');
+        validationErrors.forEach(err => this.emitOutput(`  ${err}`));
+        this.emitOutput('');
+        this.emitOutput('This means dependency detection failed. These files should not be in a clean subtree.');
+        throw new Error(`Migration blocked: ${validationErrors.length} invalid dependencies found`);
+      }
+
+      this.emitOutput('Validation passed - all imports are within subtree or merged');
+
       // Create destination directories
       for (const file of subtree.files) {
         const destPath = path.join(destDir, file);
@@ -212,52 +257,50 @@ export class StateManager {
       }
 
       // Update imports WITHIN moved files:
-      // - ts-morph's move() handles relative imports automatically
-      // - Path alias imports to other migrating files should become relative paths
-      //   (since path aliases may not work from merged location)
-      // - Files with deps to non-migrating files shouldn't be here (dependency detection prevents it)
-      this.emitOutput('Updating path alias imports within moved files...');
+      // Since validation passed, all imports are to files within the subtree or already in merged.
+      // ts-morph's move() may have converted path aliases to relative paths pointing back to
+      // restaurant (because it moved files one at a time). We need to fix these.
+      this.emitOutput('Fixing imports within moved files...');
       for (const file of subtree.files) {
         const destPath = path.join(destDir, file);
         const movedFile = project.getSourceFile(destPath);
         if (!movedFile) continue;
 
+        const movedFileDir = path.dirname(destPath);
+
         for (const imp of movedFile.getImportDeclarations()) {
-          const oldSpecifier = imp.getModuleSpecifierValue();
-
-          // Skip relative imports (ts-morph already handled these) and npm packages
-          if (oldSpecifier.startsWith('.') || oldSpecifier.startsWith('/')) {
-            continue;
-          }
-
-          // Skip known external packages
-          if (oldSpecifier.startsWith('@angular/') ||
-              oldSpecifier.startsWith('@ngrx/') ||
-              oldSpecifier.startsWith('@ionic/') ||
-              oldSpecifier.startsWith('@capacitor/') ||
-              oldSpecifier.startsWith('rxjs') ||
-              !oldSpecifier.startsWith('@')) {
-            continue;
-          }
-
-          // This is a path alias import - resolve and convert to relative if target is in merged
           const resolved = imp.getModuleSpecifierSourceFile();
           if (!resolved) continue;
 
           const resolvedPath = resolved.getFilePath();
-          const movedFileDir = path.dirname(destPath);
 
-          // Check if target is in merged (moved with us or previously migrated)
+          // Skip if already pointing to merged correctly
           if (resolvedPath.startsWith(destDir)) {
-            let newPath = path.relative(movedFileDir, resolvedPath);
-            newPath = newPath.replace(/\.ts$/, '');
-            if (!newPath.startsWith('.')) {
-              newPath = './' + newPath;
+            continue;
+          }
+
+          // Skip external (node_modules)
+          if (resolvedPath.includes('node_modules')) {
+            continue;
+          }
+
+          // If pointing to restaurant/retail, the target should now be in merged
+          if (resolvedPath.includes('/apps/restaurant/') || resolvedPath.includes('/apps/retail/')) {
+            const relativePart = resolvedPath.includes('/apps/restaurant/')
+              ? resolvedPath.split('/apps/restaurant/')[1]
+              : resolvedPath.split('/apps/retail/')[1];
+            const mergedPath = path.join(destDir, relativePart);
+
+            let newSpecifier = path.relative(movedFileDir, mergedPath);
+            newSpecifier = newSpecifier.replace(/\.ts$/, '');
+            if (!newSpecifier.startsWith('.')) {
+              newSpecifier = './' + newSpecifier;
             }
 
-            if (oldSpecifier !== newPath) {
-              this.emitOutput(`  ${path.basename(file)}: "${oldSpecifier}" → "${newPath}"`);
-              imp.setModuleSpecifier(newPath);
+            const oldSpecifier = imp.getModuleSpecifierValue();
+            if (oldSpecifier !== newSpecifier) {
+              this.emitOutput(`  ${path.basename(file)}: "${oldSpecifier}" → "${newSpecifier}"`);
+              imp.setModuleSpecifier(newSpecifier);
             }
           }
         }
