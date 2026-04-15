@@ -1,0 +1,31 @@
+// SCSS Import patterns
+
+// Old @import syntax (still widely used, being deprecated)
+@import 'variables';
+@import 'mixins';
+
+// New @use syntax (recommended)
+// @use 'variables' as vars;
+// @use 'mixins' as mix;
+
+// @use with namespace
+// @use 'variables' as *;  // imports without namespace
+
+// @forward - re-exports for other files
+// @forward 'variables';
+
+body {
+  font-family: $font-family;
+  font-size: $font-size-base;
+}
+
+.button-primary {
+  @include button-base;
+  background-color: $primary-color;
+  color: white;
+}
+
+.container {
+  @include flex-center;
+  padding: $spacing-unit * 2;
+}

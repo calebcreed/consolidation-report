@@ -16,7 +16,7 @@ export function generateInteractiveHtml(report: AnalysisReport | null, config: S
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebPOS Consolidator</title>
+  <title>Branch Consolidator</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -186,7 +186,7 @@ export function generateInteractiveHtml(report: AnalysisReport | null, config: S
     <!-- Header -->
     <div class="header">
       <div class="header-left">
-        <h1>WebPOS Consolidator</h1>
+        <h1>Branch Consolidator</h1>
         <div class="status-badge ready" id="status-badge">
           <span class="status-dot"></span>
           <span id="status-text">Ready</span>
@@ -209,7 +209,7 @@ export function generateInteractiveHtml(report: AnalysisReport | null, config: S
         <div class="config-grid">
           <div class="config-field">
             <label>Project Path</label>
-            <input type="text" id="config-project" placeholder="/path/to/webpos">
+            <input type="text" id="config-project" placeholder="/path/to/branch">
           </div>
           <div class="config-field">
             <label>Build Command</label>

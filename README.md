@@ -1,143 +1,185 @@
-# WebPOS Consolidator
+# Branch Consolidator
 
-Analyzes divergence between retail and restaurant Angular codebases to help plan consolidation into a shared codebase.
+An interactive tool for consolidating divergent Angular/TypeScript codebases. Analyzes two branches (e.g., `retail` and `restaurant`), identifies "clean subtrees" that can be safely migrated to a shared location, and handles all import rewrites automatically.
 
-## What It Does
+## Features
 
-1. **Parses Angular files** - Extracts components, services, modules, directives, pipes with their metadata
-2. **Matches files** - Maps retail files to their restaurant counterparts by path, class name, or selector
-3. **Three-way diff** - Compares both branches against the common ancestor to determine:
-   - CLEAN: Identical in both branches
-   - SAME_CHANGE: Both changed identically
-   - RETAIL_ONLY: Only retail diverged
-   - RESTAURANT_ONLY: Only restaurant diverged
-   - CONFLICT: Both diverged differently
-4. **Dependency graph** - Builds a graph of file dependencies (imports, DI, template selectors)
-5. **Clean subtree detection** - Finds subtrees where the root and all descendants are clean/same-change
-6. **Interactive report** - HTML report with filters, search, diffs, and graph visualization
+- **Watertight dependency detection** - Handles all TypeScript/Angular import patterns including path aliases, barrel files, NgRx, and Angular DI
+- **Clean subtree identification** - Finds files that are identical between branches AND have no dirty dependencies
+- **Interactive web UI** - Browse files, view diffs, migrate subtrees, run builds, rollback mistakes
+- **Safe migrations** - Git commits for each migration with full rollback/redo support
+- **Path alias handling** - Automatically adds `@appMerged/*` aliases and rewrites imports
 
-## Installation
+## Quick Start
+
+### 1. Install
 
 ```bash
-cd webpos-consolidator
 npm install
 npm run build
 ```
 
-## Usage
-
-### Full Analysis
+### 2. Test with the included fixture
 
 ```bash
-npm start -- analyze \
-  --retail ./apps/retail/src \
-  --restaurant ./apps/restaurant/src \
-  --base-commit abc123def \
-  --output ./report.html
+# Initialize git in the fixture (required once, for migration rollbacks)
+npm run init:fixture
+
+# Start the server
+npm run test:fixture
 ```
 
-### Options
+Then open http://localhost:3000
 
-| Option | Required | Description |
-|--------|----------|-------------|
-| `-r, --retail <path>` | Yes | Path to retail app source |
-| `-t, --restaurant <path>` | Yes | Path to restaurant app source |
-| `-b, --base-commit <hash>` | Yes | Git commit before the split |
-| `-s, --shared <path>` | No | Path to shared directory (default: ./shared) |
-| `-o, --output <path>` | No | HTML report output (default: ./consolidation-report.html) |
-| `-m, --mapping <path>` | No | Mapping file path (default: ./consolidation-mapping.json) |
-| `--repo-root <path>` | No | Git repo root (auto-detected if not specified) |
-
-### Quick Stats
-
-Get a quick summary without generating the full report:
+### 3. Use with your own project
 
 ```bash
-npm start -- stats \
-  --retail ./apps/retail/src \
-  --restaurant ./apps/restaurant/src \
-  --base-commit abc123def
+npm run serve -- --project /path/to/your/nx-monorepo --port 3000
 ```
 
-### Generate Mapping Only
+## How It Works
 
-Generate the file mapping without running the full analysis:
+### Analysis
+
+The tool scans your `apps/retail/` and `apps/restaurant/` directories and:
+
+1. **Compares files** - Identifies identical, conflicting, and one-sided files
+2. **Builds dependency graph** - Tracks all imports (relative, path alias, barrel, NgRx, Angular DI)
+3. **Finds clean subtrees** - A subtree is "clean" if:
+   - The root file is identical in both branches
+   - ALL dependencies are also clean (recursively)
+
+### Migration
+
+When you migrate a clean subtree:
+
+1. Files move from `apps/restaurant/src/` to `apps/merged/src/`
+2. `@appMerged/*` path aliases are added to tsconfig
+3. External files that imported from the subtree get their imports updated
+4. A git commit is created for rollback capability
+
+### Import Rewriting
+
+```
+BEFORE (in restaurant):
+  import { Foo } from '@app/utils/foo';
+
+AFTER (file stays in restaurant, foo.ts moved to merged):
+  import { Foo } from '@appMerged/utils/foo';
+```
+
+Files that move together keep their relative imports unchanged.
+
+## Project Structure
+
+```
+branch-consolidator/
+├── src/
+│   └── v2/
+│       ├── deps/          # Dependency detection
+│       │   ├── resolver.ts   # Path resolution (aliases, barrels, baseUrl)
+│       │   ├── extractor.ts  # AST-based import extraction
+│       │   └── graph.ts      # Dependency graph construction
+│       ├── diff/          # File comparison
+│       │   ├── normalizer.ts # AST normalization
+│       │   └── comparator.ts # Semantic comparison
+│       ├── report/        # Analysis reporting
+│       │   └── analyzer.ts   # Clean subtree detection
+│       └── server/        # Interactive web UI
+│           ├── index.ts      # Express server + WebSocket
+│           ├── state.ts      # Migration state management
+│           └── html.ts       # UI generation
+└── test-fixture/          # Example Nx monorepo for testing
+    ├── apps/
+    │   ├── retail/
+    │   ├── restaurant/
+    │   └── merged/
+    └── README.md
+```
+
+## Supported Patterns
+
+### TypeScript Imports
+- Relative imports (`./foo`, `../bar`)
+- Barrel/index imports (`./folder` → `folder/index.ts`)
+- Path aliases (`@app/*`, `@core/*`, `@env/*`)
+- baseUrl imports (`Payments/foo` via `baseUrl: "src"`)
+- Dynamic imports (`await import('./lazy')`)
+- Type-only imports (`import type { X }`)
+- Re-exports (`export { X } from './foo'`)
+
+### Angular
+- Constructor injection (`constructor(private foo: FooService)`)
+- `@Inject` decorators
+- NgModule imports/declarations/providers/exports
+- Template components (`<app-foo>`)
+- Template pipes (`{{ x | pipeName }}`)
+- Template directives (`[appDirective]`)
+- Lazy-loaded routes (`loadChildren`)
+
+### NgRx
+- Actions in reducers (both class-based and `createReducer`)
+- Actions in effects (`ofType(action)`)
+- Selectors and selector composition
+- Feature state registration
+
+## CLI Options
 
 ```bash
-npm start -- match \
-  --retail ./apps/retail/src \
-  --restaurant ./apps/restaurant/src \
-  --output ./mapping.json
+npm run serve -- [options]
+
+Options:
+  --project <path>     Path to your Nx monorepo (required)
+  --port <number>      Server port (default: 3000)
+  --build-command <cmd> Build command to verify migrations (default: "nx build restaurant")
 ```
 
-Edit the mapping file to add manual overrides, then run the full analysis.
+## Web UI
 
-## Finding the Base Commit
+The interactive dashboard at http://localhost:3000 provides:
 
-To find the commit where retail and restaurant diverged:
+- **Overview** - Stats on clean/conflict files, clean subtrees
+- **File Browser** - All files with status, searchable and filterable
+- **Diff Viewer** - Side-by-side diffs for any file
+- **Subtree List** - Clean subtrees ready for migration
+- **Migration Controls** - One-click migrate, build verification, rollback
+- **Terminal Output** - Live output from migrations and builds
+
+## Test Fixture
+
+The `test-fixture/` directory contains a minimal Nx monorepo that demonstrates all supported patterns. See `test-fixture/README.md` for details.
 
 ```bash
-# Find when the apps/ directory structure was created
-git log --oneline --all -- apps/retail apps/restaurant | tail -20
+# Run with the test fixture
+npm run test:fixture
 
-# Or find the merge-base if they were branches
-git merge-base branch-a branch-b
+# The fixture includes:
+# - 60+ files across retail/restaurant
+# - All import pattern types (S1-S11)
+# - All Angular patterns (A1-A12)
+# - All NgRx patterns (N1-N5)
+# - Diff scenarios (identical, conflict, one-sided, etc.)
 ```
 
-## Output
+## Troubleshooting
 
-### HTML Report
+### "0 dependencies detected"
 
-Open `consolidation-report.html` in a browser. Features:
+Make sure you're passing the correct tsconfig path. The tool needs the tsconfig to resolve path aliases.
 
-- **Stats cards** - Overview of file categories
-- **All Files tab** - Searchable, filterable list of all files with expandable diffs
-- **Movable tab** - Clean subtrees that can be moved to shared immediately
-- **Conflicts tab** - Files requiring manual merge
-- **Graph tab** - Visual dependency graph (for smaller codebases)
+### Migration blocked with dependency errors
 
-### Mapping File
+This means the "clean subtree" detection caught a file that has dependencies outside the migration set. This is the safety check working correctly - review the dependency and either:
+- Include the dependency in the migration
+- Or fix the upstream issue causing incorrect clean detection
 
-`consolidation-mapping.json` contains:
+### Rollback not working
 
-```json
-{
-  "mappings": [
-    {
-      "retailFile": "/path/to/retail/auth.service.ts",
-      "restaurantFile": "/path/to/restaurant/auth.service.ts",
-      "matchMethod": "path"
-    }
-  ],
-  "retailOnly": [...],
-  "restaurantOnly": [...],
-  "manualOverrides": {
-    "src/old-name.ts": "src/new-name.ts"
-  }
-}
-```
+The tool uses `git reset --hard` for rollback. Make sure:
+- Your project is a git repository
+- You have no uncommitted changes before migrating
+- The migration commit wasn't pushed (or you're okay force-pushing)
 
-Add entries to `manualOverrides` to fix incorrect matches, then re-run analysis.
+## License
 
-## Consolidation Strategy
-
-Based on the report:
-
-1. **Start with clean subtrees** - These can be moved to shared with no changes
-2. **Handle trivial merges** - RETAIL_ONLY and RESTAURANT_ONLY files need one branch's changes applied
-3. **Tackle conflicts last** - These need manual review and merging
-
-## Dependency Detection
-
-The tool detects these Angular dependency patterns:
-
-| Pattern | Example |
-|---------|---------|
-| ES imports | `import { X } from './x'` |
-| NgModule imports | `@NgModule({ imports: [XModule] })` |
-| Declarations | `@NgModule({ declarations: [XComponent] })` |
-| Providers | `providers: [XService]` |
-| Constructor DI | `constructor(private x: XService)` |
-| Template selectors | `<app-x>` |
-| Template pipes | `{{ y \| xPipe }}` |
-| Directive selectors | `[appX]` |
+MIT

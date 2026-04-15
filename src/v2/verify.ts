@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Comprehensive Verification Suite for WebPOS Consolidator
+ * Comprehensive Verification Suite for Branch Consolidator
  *
  * Tests all dependency species (S1-S11, A1-A12, N1-N5, O1-O4)
  * Tests all diff scenarios (D1-D15)
@@ -16,7 +16,7 @@ import { GraphBuilder } from './deps/graph';
 import { SemanticComparator } from './diff/comparator';
 import { DiffResult } from './diff/types';
 
-const MODEL_PATH = '/Users/calebcreed/Downloads/webpos-model';
+const MODEL_PATH = '/Users/calebcreed/Downloads/test-fixture';
 const RESTAURANT_APP = path.join(MODEL_PATH, 'apps/restaurant');
 const RETAIL_APP = path.join(MODEL_PATH, 'apps/retail');
 const TSCONFIG_PATH = path.join(RESTAURANT_APP, 'tsconfig.app.json');
@@ -382,7 +382,7 @@ async function testMigrationLogic() {
 
 async function main() {
   console.log('╔═══════════════════════════════════════════════════════════════╗');
-  console.log('║     WebPOS Consolidator - Comprehensive Verification Suite     ║');
+  console.log('║     Branch Consolidator - Comprehensive Verification Suite     ║');
   console.log('╠═══════════════════════════════════════════════════════════════╣');
   console.log('║  Model Path: ' + MODEL_PATH.padEnd(47) + '║');
   console.log('║  Timestamp:  ' + new Date().toISOString().padEnd(47) + '║');

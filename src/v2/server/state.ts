@@ -22,7 +22,7 @@ export interface MigrationRecord {
 }
 
 export interface ServerConfig {
-  projectPath: string;       // Path to webpos project
+  projectPath: string;       // Path to project
   retailBranch: string;      // e.g., 'retail'
   restaurantBranch: string;  // e.g., 'restaurant'
   sharedPath: string;        // e.g., 'libs/shared'
@@ -117,6 +117,69 @@ export class StateManager {
       this.state.currentBuild.output.shift();
     }
     this.outputListeners.forEach(l => l(line));
+  }
+
+  /**
+   * Ensure merged aliases exist in tsconfig
+   * For each path alias like @app/*, add @appMerged/* pointing to merged
+   * Returns a map of original alias -> merged alias
+   */
+  private ensureMergedAliases(config: ServerConfig): Record<string, string> {
+    const tsconfigPath = config.tsconfigPath;
+    const tsconfigContent = fs.readFileSync(tsconfigPath, 'utf-8');
+
+    // Parse tsconfig (handle JSON5 - comments, trailing commas)
+    const strings: string[] = [];
+    let cleaned = tsconfigContent.replace(/"(?:[^"\\]|\\.)*"/g, (match) => {
+      const idx = strings.length;
+      strings.push(match);
+      return `__STRING_${idx}__`;
+    });
+    cleaned = cleaned.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    cleaned = cleaned.replace(/__STRING_(\d+)__/g, (_, idx) => strings[parseInt(idx)]);
+    cleaned = cleaned.replace(/,(\s*[\}\]])/g, '$1');
+
+    const tsconfig = JSON.parse(cleaned);
+    const paths = tsconfig.compilerOptions?.paths || {};
+
+    // Build map of original -> merged aliases
+    const aliasMap: Record<string, string> = {};
+    const newPaths: Record<string, string[]> = { ...paths };
+    let modified = false;
+
+    for (const [alias, targets] of Object.entries(paths)) {
+      // Skip if already a merged alias or external
+      if (alias.includes('Merged') || alias === 'shared/*') continue;
+
+      // Create merged version: @app/* -> @appMerged/*
+      const baseName = alias.replace('@', '').replace('/*', '');
+      const mergedAlias = `@${baseName}Merged/*`;
+
+      aliasMap[alias] = mergedAlias;
+
+      // Add merged alias if not already present
+      if (!paths[mergedAlias]) {
+        // Calculate path to merged: ../../merged/src/app/* for @app/*
+        const originalTarget = (targets as string[])[0]; // e.g., "app/*" or "environments/*"
+        const mergedTarget = `../../merged/src/${originalTarget}`;
+
+        newPaths[mergedAlias] = [mergedTarget];
+        modified = true;
+        this.emitOutput(`  Adding alias: ${mergedAlias} -> ${mergedTarget}`);
+      }
+    }
+
+    // Write updated tsconfig if modified
+    if (modified) {
+      tsconfig.compilerOptions = tsconfig.compilerOptions || {};
+      tsconfig.compilerOptions.paths = newPaths;
+
+      // Write with nice formatting
+      fs.writeFileSync(tsconfigPath, JSON.stringify(tsconfig, null, 2));
+      this.emitOutput(`  Updated tsconfig: ${tsconfigPath}`);
+    }
+
+    return aliasMap;
   }
 
   /**
@@ -255,91 +318,101 @@ export class StateManager {
         }
       }
 
-      // Fix imports in moved files:
-      // ALL path aliases must become relative paths because:
-      // - Restaurant build uses restaurant's tsconfig
-      // - @app/* resolves to restaurant/src/app/* even for files in merged
-      // - So @app/utils/foo in merged would wrongly point to restaurant!
-      this.emitOutput('Converting path aliases to relative paths in moved files...');
+      // OPTION B: Use @aliasMerged pattern
+      // Add merged aliases to tsconfig so @appMerged/* -> merged/src/app/*
+      // Then simply replace @app/ with @appMerged/ in imports
+      const mergedAliases = this.ensureMergedAliases(config);
+      this.emitOutput(`Merged aliases available: ${Object.keys(mergedAliases).join(', ')}`);
+
+      // Convert path aliases in moved files: @app/ -> @appMerged/
+      this.emitOutput('Converting path aliases to merged aliases in moved files...');
       for (const file of subtree.files) {
         const destPath = path.join(destDir, file);
         const movedFile = project.getSourceFile(destPath);
         if (!movedFile) continue;
 
-        const movedFileDir = path.dirname(destPath);
-
         for (const imp of movedFile.getImportDeclarations()) {
           const specifier = imp.getModuleSpecifierValue();
 
-          // Skip npm packages
-          if (specifier.startsWith('@angular/') ||
-              specifier.startsWith('@ngrx/') ||
-              specifier.startsWith('@ionic/') ||
-              specifier.startsWith('@capacitor/') ||
-              specifier.startsWith('rxjs') ||
-              (!specifier.startsWith('.') && !specifier.startsWith('@'))) {
-            continue;
-          }
+          // Check if this is a path alias that needs conversion
+          for (const [alias, mergedAlias] of Object.entries(mergedAliases)) {
+            const aliasPrefix = alias.replace('/*', '/');
+            const mergedPrefix = mergedAlias.replace('/*', '/');
 
-          const resolved = imp.getModuleSpecifierSourceFile();
-          if (!resolved) continue;
-
-          const resolvedPath = resolved.getFilePath() as string;
-
-          // Calculate correct relative path
-          // The resolved path might point to restaurant (ts-morph resolved via old tsconfig)
-          // but the file is now in merged, so we need to point to merged version
-          let targetPath: string = resolvedPath;
-
-          // If resolved to restaurant, check if that file was also migrated
-          if (resolvedPath.includes('/apps/restaurant/')) {
-            const originalSrcPath = resolvedPath;
-            if (srcToDestMap.has(originalSrcPath)) {
-              targetPath = srcToDestMap.get(originalSrcPath)!;
-            }
-          }
-
-          // If target is in merged, create relative path within merged
-          if (targetPath.startsWith(destDir) || srcToDestMap.has(resolvedPath)) {
-            const actualTarget = srcToDestMap.get(resolvedPath) || targetPath;
-            let newSpecifier = path.relative(movedFileDir, actualTarget);
-            newSpecifier = newSpecifier.replace(/\.ts$/, '');
-            if (!newSpecifier.startsWith('.')) {
-              newSpecifier = './' + newSpecifier;
-            }
-
-            if (specifier !== newSpecifier) {
-              this.emitOutput(`  ${path.basename(file)}: "${specifier}" → "${newSpecifier}"`);
-              imp.setModuleSpecifier(newSpecifier);
+            if (specifier.startsWith(aliasPrefix) || specifier === alias.replace('/*', '')) {
+              // Check if target was migrated (resolves to restaurant but is in our set)
+              const resolved = imp.getModuleSpecifierSourceFile();
+              if (resolved) {
+                const resolvedPath = resolved.getFilePath() as string;
+                if (srcToDestMap.has(resolvedPath)) {
+                  // Target was migrated - use merged alias
+                  const newSpecifier = specifier.replace(aliasPrefix, mergedPrefix);
+                  if (specifier !== newSpecifier) {
+                    this.emitOutput(`  ${path.basename(file)}: "${specifier}" → "${newSpecifier}"`);
+                    imp.setModuleSpecifier(newSpecifier);
+                  }
+                  break;
+                }
+              }
             }
           }
         }
       }
 
-      // Update imports in external files to point to merged
-      this.emitOutput('Updating imports in external files...');
+      // Update imports in external files (staying in restaurant) to use merged aliases
+      this.emitOutput('Updating imports in external files to use merged aliases...');
       for (const [extFile, _] of externalDependents) {
         for (const imp of extFile.getImportDeclarations()) {
+          const specifier = imp.getModuleSpecifierValue();
           const resolved = imp.getModuleSpecifierSourceFile();
           if (!resolved) continue;
 
-          const resolvedPath = resolved.getFilePath();
-          const originalSrcPath = resolvedPath.replace(destDir, srcDir);
-          const destPath = srcToDestMap.get(originalSrcPath) || srcToDestMap.get(resolvedPath);
+          const resolvedPath = resolved.getFilePath() as string;
 
-          if (destPath && resolved.getFilePath() === destPath) {
-            const oldSpecifier = imp.getModuleSpecifierValue();
+          // If this import points to a migrated file, convert to merged alias
+          if (srcToDestMap.has(resolvedPath.replace(destDir, srcDir)) || srcToDestMap.has(resolvedPath)) {
+            // Check if it's a path alias
+            for (const [alias, mergedAlias] of Object.entries(mergedAliases)) {
+              const aliasPrefix = alias.replace('/*', '/');
+              const mergedPrefix = mergedAlias.replace('/*', '/');
 
-            // Calculate new relative path from external file to merged location
-            const extFileDir = path.dirname(extFile.getFilePath());
-            let newPath = path.relative(extFileDir, destPath);
-            newPath = newPath.replace(/\.ts$/, '');
-            if (!newPath.startsWith('.')) {
-              newPath = './' + newPath;
+              if (specifier.startsWith(aliasPrefix) || specifier === alias.replace('/*', '')) {
+                const newSpecifier = specifier.replace(aliasPrefix, mergedPrefix);
+                if (specifier !== newSpecifier) {
+                  this.emitOutput(`  ${extFile.getBaseName()}: "${specifier}" → "${newSpecifier}"`);
+                  imp.setModuleSpecifier(newSpecifier);
+                }
+                break;
+              }
             }
 
-            this.emitOutput(`  ${extFile.getBaseName()}: "${oldSpecifier}" → "${newPath}"`);
-            imp.setModuleSpecifier(newPath);
+            // If it's a relative import pointing to migrated file, convert to merged alias
+            if (specifier.startsWith('.')) {
+              // Find which alias this path would match
+              const targetInMerged = srcToDestMap.get(resolvedPath.replace(destDir, srcDir)) || srcToDestMap.get(resolvedPath);
+              if (targetInMerged) {
+                // Calculate the relative part within src/app or src/environments etc.
+                const mergedRelative = targetInMerged.replace(destDir + '/src/', '');
+
+                // Find matching merged alias
+                for (const [alias, mergedAlias] of Object.entries(mergedAliases)) {
+                  const aliasBase = alias.replace('/*', '').replace('@', '');
+                  // e.g., app/* -> check if mergedRelative starts with app/
+                  const pathBase = aliasBase === 'app' ? 'app/' :
+                                   aliasBase === 'env' ? 'environments/' :
+                                   aliasBase + '/';
+
+                  if (mergedRelative.startsWith(pathBase) || mergedRelative.startsWith('app/') && aliasBase === 'app') {
+                    const suffix = mergedRelative.replace(/^app\//, '').replace(/^environments\//, '').replace(/\.ts$/, '');
+                    const mergedPrefix = mergedAlias.replace('/*', '/');
+                    const newSpecifier = mergedPrefix + suffix;
+                    this.emitOutput(`  ${extFile.getBaseName()}: "${specifier}" → "${newSpecifier}"`);
+                    imp.setModuleSpecifier(newSpecifier);
+                    break;
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -680,7 +753,7 @@ export class StateManager {
 
     const lastMigration = this.state.migrations[this.state.migrations.length - 1];
 
-    return `Build/Migration errors from WebPOS consolidation:
+    return `Build/Migration errors from Branch consolidation:
 
 **Error lines:**
 \`\`\`

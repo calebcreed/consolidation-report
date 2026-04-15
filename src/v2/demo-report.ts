@@ -2,7 +2,7 @@
 /**
  * Demo Report Generator
  *
- * Generates a sample report from webpos-model to demonstrate the v2 report module.
+ * Generates a sample report from test-fixture to demonstrate the v2 report module.
  * This creates mock retail/restaurant comparison data since we only have one branch.
  *
  * Run: npx ts-node src/v2/demo-report.ts
@@ -15,12 +15,12 @@ import { GraphBuilder } from './deps/graph';
 import { SemanticComparator } from './diff/comparator';
 import { ReportAnalyzer, TerminalReporter, HtmlReporter, FileMatch, FileStatus } from './report';
 
-const MODEL_PATH = '/Users/calebcreed/Downloads/webpos-model';
+const MODEL_PATH = '/Users/calebcreed/Downloads/test-fixture';
 const RESTAURANT_APP = path.join(MODEL_PATH, 'apps/restaurant');
 const TSCONFIG_PATH = path.join(RESTAURANT_APP, 'tsconfig.app.json');
 
 async function main() {
-  console.log('WebPOS v2 Report Demo');
+  console.log('Branch v2 Report Demo');
   console.log('='.repeat(50));
   console.log(`Model path: ${MODEL_PATH}`);
   console.log('');
@@ -71,7 +71,7 @@ function createMockFileMatches(graph: import('./deps/graph').DependencyGraph): F
   const matches: FileMatch[] = [];
 
   // Use diff-examples directory for actual diff scenarios if it exists
-  const diffExamplesPath = '/Users/calebcreed/Downloads/webpos-model/apps/restaurant/src/app/diff-examples';
+  const diffExamplesPath = '/Users/calebcreed/Downloads/test-fixture/apps/restaurant/src/app/diff-examples';
   const hasDiffExamples = fs.existsSync(diffExamplesPath);
 
   for (const filePath of files) {

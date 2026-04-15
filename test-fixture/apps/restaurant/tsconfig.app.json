@@ -1,0 +1,37 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "skipLibCheck": true,
+    "rootDir": "..",
+    "baseUrl": "src",
+    "outDir": "../../dist/out-tsc",
+    "types": ["node", "chrome", "googlemaps"],
+    "paths": {
+      "@app/*": ["app/*"],
+      "@appCommon/*": ["app/modules/+appCommon/*"],
+      "@assets/*": ["assets/*"],
+      "@auth/*": ["app/modules/+auth/*"],
+      "@checklist/*": ["app/modules/+checklist/*"],
+      "@core/*": ["app/core/*"],
+      "@env/*": ["environments/*"],
+      "@operation/*": ["app/modules/+operation/*"],
+      "@paymentModule/*": ["app/modules/+paymentModule/*"],
+      "@sharedModule/*": ["app/shared/*"],
+      "@splitModule/*": ["app/modules/+splitModule/*"],
+      "shared/*": ["../../shared/src/public-api", "../../../dist/shared"]
+    }
+  },
+  "angularCompilerOptions": {
+    "enableIvy": true,
+    "skipLibCheck": true
+  },
+  "files": ["src/main.ts"],
+  "include": ["src/**/*.ts", "src/**/*.d.ts"],
+  "exclude": [
+    "src/**/*.spec.ts",
+    "src/app/modules/+WaiterApp/**/*.ts",
+    "src/app/modules/+paymentApp/**/*.ts",
+    "src/stubs/*.ts",
+    "src/**/*.worker.ts"
+  ]
+}

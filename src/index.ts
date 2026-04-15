@@ -794,7 +794,7 @@ async function runAnalysis(options: {
   const mappingPath = path.resolve(options.mapping);
   const repoRoot = options.repoRoot ? path.resolve(options.repoRoot) : findGitRoot(retailPath);
 
-  console.log('WebPOS Consolidation Analyzer');
+  console.log('Branch Consolidation Analyzer');
   console.log('=============================');
   console.log(`Retail:      ${retailPath}`);
   console.log(`Restaurant:  ${restaurantPath}`);

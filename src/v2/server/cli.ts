@@ -7,7 +7,7 @@
  *
  * Options:
  *   --port, -p       Port to run server on (default: 3000)
- *   --project        Path to WebPOS project
+ *   --project        Path to Branch project
  *   --build-command  Build command (default: "nx build restaurant")
  *   --open           Open browser automatically
  */
@@ -38,7 +38,7 @@ for (let i = 0; i < args.length; i++) {
     openBrowser = true;
   } else if (arg === '--help' || arg === '-h') {
     console.log(`
-WebPOS Consolidator - Interactive Server
+Branch Consolidator - Interactive Server
 
 Usage:
   node dist/v2/server/cli.js [options]
@@ -46,7 +46,7 @@ Usage:
 
 Options:
   --port, -p <port>       Port to run server on (default: 3000)
-  --project <path>        Path to WebPOS project
+  --project <path>        Path to Branch project
   --build-command <cmd>   Build command (default: "nx build restaurant")
   --open, -o              Open browser automatically
   --help, -h              Show this help message
@@ -56,7 +56,7 @@ Examples:
   node dist/v2/server/cli.js
 
   # Specify project path
-  node dist/v2/server/cli.js --project /home/user/webpos --port 8080 --open
+  node dist/v2/server/cli.js --project /home/user/branch --port 8080 --open
 
   # Use custom build command
   node dist/v2/server/cli.js --build-command "ng build --configuration=production"

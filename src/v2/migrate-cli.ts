@@ -319,7 +319,7 @@ Examples:
   }
 
   // Config
-  const projectPath = '/Users/calebcreed/Downloads/webpos-model';
+  const projectPath = '/Users/calebcreed/Downloads/test-fixture';
   const tsconfigPath = path.join(projectPath, 'apps/restaurant/tsconfig.app.json');
 
   console.log('='.repeat(60));

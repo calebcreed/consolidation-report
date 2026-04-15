@@ -1,0 +1,6 @@
+{
+  "paperWidth": 80,
+  "defaultPort": 9100,
+  "timeout": 5000,
+  "retryAttempts": 3
+}

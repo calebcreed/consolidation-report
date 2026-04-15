@@ -4,7 +4,7 @@
  *
  * Serves the HTML report with live migration/build/rollback controls
  *
- * Usage: consolidate serve --port 3000 --project /path/to/webpos
+ * Usage: consolidate serve --port 3000 --project /path/to/branch
  */
 
 import * as http from 'http';
@@ -560,7 +560,7 @@ export function startServer(port: number = 3000): void {
     console.log(`
 ┌────────────────────────────────────────────────────────────────┐
 │                                                                │
-│   WebPOS Consolidator Server                                   │
+│   Branch Consolidator Server                                   │
 │                                                                │
 │   Running at: http://localhost:${port}                          │
 │                                                                │

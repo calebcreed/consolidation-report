@@ -104,7 +104,7 @@ export class ReportGenerator {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebPOS Consolidation Report</title>
+  <title>Branch Consolidation Report</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -195,7 +195,7 @@ export class ReportGenerator {
 </head>
 <body>
   <div class="container">
-    <h1>WebPOS Consolidation Report</h1>
+    <h1>Branch Consolidation Report</h1>
     <p class="meta">Generated: ${data.generatedAt}</p>
 
     <div class="stats-grid">

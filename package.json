@@ -1,7 +1,7 @@
 {
-  "name": "webpos-consolidator",
+  "name": "branch-consolidator",
   "version": "2.0.0",
-  "description": "Angular codebase consolidation analyzer with watertight dependency detection",
+  "description": "Angular codebase consolidation tool with watertight dependency detection and interactive migration",
   "main": "dist/index.js",
   "bin": {
     "consolidate": "./dist/index.js"
@@ -12,9 +12,11 @@
     "analyze": "npm run build && npm start",
     "verify": "npm run build && node dist/v2/verify.js",
     "report": "npm run build && node dist/v2/demo-report.js",
-    "serve": "npm run build && node dist/v2/server/cli.js",
+    "serve": "npm run build && node dist/v2/server/index.js",
     "test": "jest",
-    "test:v2": "jest src/v2/"
+    "test:v2": "jest src/v2/",
+    "test:fixture": "npm run build && node dist/v2/server/index.js --project ./test-fixture --port 3000",
+    "init:fixture": "cd test-fixture && git init && git add -A && git commit -m 'Initial commit'"
   },
   "dependencies": {
     "commander": "^11.1.0",

@@ -45,7 +45,7 @@ export class TerminalReporter {
 
     lines.push('');
     lines.push(this.c('bold', '═'.repeat(70)));
-    lines.push(this.c('bold', '  WebPOS Consolidation Report'));
+    lines.push(this.c('bold', '  Branch Consolidation Report'));
     lines.push(this.c('dim', `  Generated: ${report.generatedAt}`));
     lines.push(this.c('bold', '═'.repeat(70)));
     lines.push('');

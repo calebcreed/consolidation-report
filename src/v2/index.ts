@@ -1,5 +1,5 @@
 /**
- * WebPOS Consolidator v2 - Unified API
+ * Branch Consolidator v2 - Unified API
  *
  * Complete rewrite of dependency detection and AST-based diffing.
  */

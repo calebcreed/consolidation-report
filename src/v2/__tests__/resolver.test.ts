@@ -5,7 +5,7 @@
 import * as path from 'path';
 import { PathResolver } from '../deps/resolver';
 
-const MODEL_PATH = '/Users/calebcreed/Downloads/webpos-model';
+const MODEL_PATH = '/Users/calebcreed/Downloads/test-fixture';
 const RESTAURANT_APP = path.join(MODEL_PATH, 'apps/restaurant');
 const TSCONFIG_PATH = path.join(RESTAURANT_APP, 'tsconfig.app.json');
 
