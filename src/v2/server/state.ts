@@ -243,7 +243,6 @@ export class StateManager {
       }
 
       // Move all files in the subtree together
-      // Since they move together, relative imports between them stay unchanged
       this.emitOutput('Moving files...');
       for (const file of subtree.files) {
         const srcPath = path.join(srcDir, file);
@@ -256,11 +255,12 @@ export class StateManager {
         }
       }
 
-      // Update imports WITHIN moved files:
-      // Since validation passed, all imports are to files within the subtree or already in merged.
-      // ts-morph's move() may have converted path aliases to relative paths pointing back to
-      // restaurant (because it moved files one at a time). We need to fix these.
-      this.emitOutput('Fixing imports within moved files...');
+      // Fix imports in moved files:
+      // ALL path aliases must become relative paths because:
+      // - Restaurant build uses restaurant's tsconfig
+      // - @app/* resolves to restaurant/src/app/* even for files in merged
+      // - So @app/utils/foo in merged would wrongly point to restaurant!
+      this.emitOutput('Converting path aliases to relative paths in moved files...');
       for (const file of subtree.files) {
         const destPath = path.join(destDir, file);
         const movedFile = project.getSourceFile(destPath);
@@ -269,37 +269,47 @@ export class StateManager {
         const movedFileDir = path.dirname(destPath);
 
         for (const imp of movedFile.getImportDeclarations()) {
+          const specifier = imp.getModuleSpecifierValue();
+
+          // Skip npm packages
+          if (specifier.startsWith('@angular/') ||
+              specifier.startsWith('@ngrx/') ||
+              specifier.startsWith('@ionic/') ||
+              specifier.startsWith('@capacitor/') ||
+              specifier.startsWith('rxjs') ||
+              (!specifier.startsWith('.') && !specifier.startsWith('@'))) {
+            continue;
+          }
+
           const resolved = imp.getModuleSpecifierSourceFile();
           if (!resolved) continue;
 
-          const resolvedPath = resolved.getFilePath();
+          const resolvedPath = resolved.getFilePath() as string;
 
-          // Skip if already pointing to merged correctly
-          if (resolvedPath.startsWith(destDir)) {
-            continue;
+          // Calculate correct relative path
+          // The resolved path might point to restaurant (ts-morph resolved via old tsconfig)
+          // but the file is now in merged, so we need to point to merged version
+          let targetPath: string = resolvedPath;
+
+          // If resolved to restaurant, check if that file was also migrated
+          if (resolvedPath.includes('/apps/restaurant/')) {
+            const originalSrcPath = resolvedPath;
+            if (srcToDestMap.has(originalSrcPath)) {
+              targetPath = srcToDestMap.get(originalSrcPath)!;
+            }
           }
 
-          // Skip external (node_modules)
-          if (resolvedPath.includes('node_modules')) {
-            continue;
-          }
-
-          // If pointing to restaurant/retail, the target should now be in merged
-          if (resolvedPath.includes('/apps/restaurant/') || resolvedPath.includes('/apps/retail/')) {
-            const relativePart = resolvedPath.includes('/apps/restaurant/')
-              ? resolvedPath.split('/apps/restaurant/')[1]
-              : resolvedPath.split('/apps/retail/')[1];
-            const mergedPath = path.join(destDir, relativePart);
-
-            let newSpecifier = path.relative(movedFileDir, mergedPath);
+          // If target is in merged, create relative path within merged
+          if (targetPath.startsWith(destDir) || srcToDestMap.has(resolvedPath)) {
+            const actualTarget = srcToDestMap.get(resolvedPath) || targetPath;
+            let newSpecifier = path.relative(movedFileDir, actualTarget);
             newSpecifier = newSpecifier.replace(/\.ts$/, '');
             if (!newSpecifier.startsWith('.')) {
               newSpecifier = './' + newSpecifier;
             }
 
-            const oldSpecifier = imp.getModuleSpecifierValue();
-            if (oldSpecifier !== newSpecifier) {
-              this.emitOutput(`  ${path.basename(file)}: "${oldSpecifier}" → "${newSpecifier}"`);
+            if (specifier !== newSpecifier) {
+              this.emitOutput(`  ${path.basename(file)}: "${specifier}" → "${newSpecifier}"`);
               imp.setModuleSpecifier(newSpecifier);
             }
           }
