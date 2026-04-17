@@ -1,6 +1,12 @@
 /**
  * Server State Management
  * Tracks migrations, build status, and enables rollback
+ *
+ * DUAL-BRANCH MIGRATION:
+ * - Copies files from restaurant to merged (identical to retail for clean subtrees)
+ * - Deletes from BOTH retail AND restaurant
+ * - Updates BOTH tsconfigs with @appMerged/* aliases
+ * - Rewrites imports in BOTH branches
  */
 
 import * as fs from 'fs';
@@ -120,17 +126,12 @@ export class StateManager {
   }
 
   /**
-   * Ensure merged aliases exist in tsconfig
-   * For each path alias like @app/*, add @appMerged/* pointing to merged
-   * Returns a map of original alias -> merged alias
+   * Parse a tsconfig file (handles JSON5 - comments, trailing commas)
    */
-  private ensureMergedAliases(config: ServerConfig): Record<string, string> {
-    const tsconfigPath = config.tsconfigPath;
-    const tsconfigContent = fs.readFileSync(tsconfigPath, 'utf-8');
-
-    // Parse tsconfig (handle JSON5 - comments, trailing commas)
+  private parseTsconfig(tsconfigPath: string): any {
+    const content = fs.readFileSync(tsconfigPath, 'utf-8');
     const strings: string[] = [];
-    let cleaned = tsconfigContent.replace(/"(?:[^"\\]|\\.)*"/g, (match) => {
+    let cleaned = content.replace(/"(?:[^"\\]|\\.)*"/g, (match) => {
       const idx = strings.length;
       strings.push(match);
       return `__STRING_${idx}__`;
@@ -138,8 +139,16 @@ export class StateManager {
     cleaned = cleaned.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
     cleaned = cleaned.replace(/__STRING_(\d+)__/g, (_, idx) => strings[parseInt(idx)]);
     cleaned = cleaned.replace(/,(\s*[\}\]])/g, '$1');
+    return JSON.parse(cleaned);
+  }
 
-    const tsconfig = JSON.parse(cleaned);
+  /**
+   * Ensure merged aliases exist in a single tsconfig
+   */
+  private ensureMergedAliasesForTsconfig(tsconfigPath: string, branchName: string): Record<string, string> {
+    this.emitOutput(`  Checking ${branchName} tsconfig: ${path.basename(tsconfigPath)}`);
+
+    const tsconfig = this.parseTsconfig(tsconfigPath);
     const paths = tsconfig.compilerOptions?.paths || {};
 
     // Build map of original -> merged aliases
@@ -160,12 +169,12 @@ export class StateManager {
       // Add merged alias if not already present
       if (!paths[mergedAlias]) {
         // Calculate path to merged: ../../merged/src/app/* for @app/*
-        const originalTarget = (targets as string[])[0]; // e.g., "app/*" or "environments/*"
+        const originalTarget = (targets as string[])[0];
         const mergedTarget = `../../merged/src/${originalTarget}`;
 
         newPaths[mergedAlias] = [mergedTarget];
         modified = true;
-        this.emitOutput(`  Adding alias: ${mergedAlias} -> ${mergedTarget}`);
+        this.emitOutput(`    Adding alias: ${mergedAlias} -> ${mergedTarget}`);
       }
     }
 
@@ -173,10 +182,36 @@ export class StateManager {
     if (modified) {
       tsconfig.compilerOptions = tsconfig.compilerOptions || {};
       tsconfig.compilerOptions.paths = newPaths;
-
-      // Write with nice formatting
       fs.writeFileSync(tsconfigPath, JSON.stringify(tsconfig, null, 2));
-      this.emitOutput(`  Updated tsconfig: ${tsconfigPath}`);
+      this.emitOutput(`    Updated ${branchName} tsconfig`);
+    } else {
+      this.emitOutput(`    ${branchName} tsconfig already has merged aliases`);
+    }
+
+    return aliasMap;
+  }
+
+  /**
+   * Ensure merged aliases exist in BOTH retail and restaurant tsconfigs
+   */
+  private ensureMergedAliases(config: ServerConfig): Record<string, string> {
+    this.emitOutput('Adding @appMerged/* aliases to both tsconfigs...');
+
+    // Find both tsconfig files
+    const restaurantTsconfig = path.join(config.projectPath, 'apps/restaurant/tsconfig.app.json');
+    const retailTsconfig = path.join(config.projectPath, 'apps/retail/tsconfig.app.json');
+
+    // Update restaurant tsconfig
+    const aliasMap = this.ensureMergedAliasesForTsconfig(
+      fs.existsSync(restaurantTsconfig) ? restaurantTsconfig : config.tsconfigPath,
+      'restaurant'
+    );
+
+    // Update retail tsconfig if it exists
+    if (fs.existsSync(retailTsconfig)) {
+      this.ensureMergedAliasesForTsconfig(retailTsconfig, 'retail');
+    } else {
+      this.emitOutput(`  Retail tsconfig not found at ${retailTsconfig}, skipping`);
     }
 
     return aliasMap;
@@ -185,9 +220,11 @@ export class StateManager {
   /**
    * Migrate a clean subtree to merged
    *
-   * Key insight: Files in a clean subtree move TOGETHER, so their relative
-   * imports to each other stay unchanged. Only external files that import
-   * FROM the subtree need their imports updated.
+   * DUAL-BRANCH HANDLING:
+   * - Copy files from restaurant to merged (restaurant and retail are identical for clean subtrees)
+   * - Delete from BOTH retail AND restaurant
+   * - Update imports in BOTH branches that point to migrated files
+   * - Add @appMerged/* aliases to BOTH tsconfigs
    */
   async migrate(subtree: CleanSubtree): Promise<MigrationRecord> {
     const config = this.state.config;
@@ -199,19 +236,21 @@ export class StateManager {
       timestamp: new Date().toISOString(),
       subtreeRoot: subtree.rootPath,
       files: subtree.files,
-      fromBranch: config.restaurantBranch,
+      fromBranch: 'retail+restaurant',  // Both branches!
       toBranch: 'merged',
       status: 'pending',
     };
 
     try {
-      // Note: subtree.files are like "src/app/foo.ts", so srcDir/destDir should NOT include /src
-      const srcDir = path.join(config.projectPath, 'apps/restaurant');
+      // Paths for all three locations
+      const restaurantDir = path.join(config.projectPath, 'apps/restaurant');
+      const retailDir = path.join(config.projectPath, 'apps/retail');
       const destDir = path.join(config.projectPath, 'apps/merged');
 
       this.emitOutput(`Migrating clean subtree: ${subtree.files.length} files`);
+      this.emitOutput(`  From: retail + restaurant → merged`);
 
-      // Load ts-morph project
+      // Load ts-morph project with ALL apps
       this.emitOutput('Loading TypeScript project...');
       const project = new Project({
         tsConfigFilePath: config.tsconfigPath,
@@ -220,19 +259,30 @@ export class StateManager {
       project.addSourceFilesAtPaths(path.join(config.projectPath, 'apps', '**', 'src', '**', '*.ts'));
       this.emitOutput(`Loaded ${project.getSourceFiles().length} source files`);
 
-      // Build set of files being migrated
+      // Build set of files being migrated - track BOTH branches
       const migratingFiles = new Set<string>();
       const srcToDestMap = new Map<string, string>();
 
       for (const file of subtree.files) {
-        const srcPath = path.join(srcDir, file);
+        const restaurantPath = path.join(restaurantDir, file);
+        const retailPath = path.join(retailDir, file);
         const destPath = path.join(destDir, file);
-        migratingFiles.add(srcPath);
-        srcToDestMap.set(srcPath, destPath);
+
+        // Track restaurant files
+        migratingFiles.add(restaurantPath);
+        srcToDestMap.set(restaurantPath, destPath);
+
+        // Track retail files (same relative path)
+        if (fs.existsSync(retailPath)) {
+          migratingFiles.add(retailPath);
+          srcToDestMap.set(retailPath, destPath);
+        }
       }
 
-      // Find external files that import from our subtree
+      // Find external files that import from our subtree - check BOTH branches
       const externalDependents: Map<any, Set<string>> = new Map();
+      let restaurantDependentCount = 0;
+      let retailDependentCount = 0;
 
       for (const sf of project.getSourceFiles()) {
         const sfPath = sf.getFilePath();
@@ -243,6 +293,8 @@ export class StateManager {
           if (resolved && migratingFiles.has(resolved.getFilePath())) {
             if (!externalDependents.has(sf)) {
               externalDependents.set(sf, new Set());
+              if (sfPath.includes('/apps/restaurant/')) restaurantDependentCount++;
+              if (sfPath.includes('/apps/retail/')) retailDependentCount++;
             }
             externalDependents.get(sf)!.add(resolved.getFilePath());
           }
@@ -250,37 +302,52 @@ export class StateManager {
       }
 
       this.emitOutput(`Found ${externalDependents.size} external files that import from this subtree`);
+      this.emitOutput(`  Restaurant: ${restaurantDependentCount}, Retail: ${retailDependentCount}`);
 
       // SAFETY CHECK: Verify no file in subtree imports from restaurant/retail (outside subtree)
-      // This catches dependency detection failures before we corrupt the codebase
       this.emitOutput('Validating subtree has no external dependencies...');
       const validationErrors: string[] = [];
 
+      // Check restaurant files
       for (const file of subtree.files) {
-        const srcPath = path.join(srcDir, file);
-        const sourceFile = project.getSourceFile(srcPath);
+        const restaurantPath = path.join(restaurantDir, file);
+        const sourceFile = project.getSourceFile(restaurantPath);
         if (!sourceFile) continue;
 
         for (const imp of sourceFile.getImportDeclarations()) {
           const specifier = imp.getModuleSpecifierValue();
           const resolved = imp.getModuleSpecifierSourceFile();
-
           if (!resolved) continue;
 
           const resolvedPath = resolved.getFilePath();
-
-          // Skip if target is in the migration set
           if (migratingFiles.has(resolvedPath)) continue;
-
-          // Skip if target is already in merged
           if (resolvedPath.startsWith(destDir)) continue;
-
-          // Skip external packages
           if (resolvedPath.includes('node_modules')) continue;
 
-          // This import points to restaurant/retail but target is NOT migrating - BAD!
           if (resolvedPath.includes('/apps/restaurant/') || resolvedPath.includes('/apps/retail/')) {
-            validationErrors.push(`${path.basename(file)}: imports "${specifier}" -> ${path.basename(resolvedPath)} (NOT in migration set)`);
+            validationErrors.push(`restaurant/${path.basename(file)}: imports "${specifier}" -> ${path.basename(resolvedPath)} (NOT in migration set)`);
+          }
+        }
+      }
+
+      // Check retail files
+      for (const file of subtree.files) {
+        const retailPath = path.join(retailDir, file);
+        const sourceFile = project.getSourceFile(retailPath);
+        if (!sourceFile) continue;
+
+        for (const imp of sourceFile.getImportDeclarations()) {
+          const specifier = imp.getModuleSpecifierValue();
+          const resolved = imp.getModuleSpecifierSourceFile();
+          if (!resolved) continue;
+
+          const resolvedPath = resolved.getFilePath();
+          if (migratingFiles.has(resolvedPath)) continue;
+          if (resolvedPath.startsWith(destDir)) continue;
+          if (resolvedPath.includes('node_modules')) continue;
+
+          if (resolvedPath.includes('/apps/restaurant/') || resolvedPath.includes('/apps/retail/')) {
+            validationErrors.push(`retail/${path.basename(file)}: imports "${specifier}" -> ${path.basename(resolvedPath)} (NOT in migration set)`);
           }
         }
       }
@@ -305,22 +372,20 @@ export class StateManager {
         }
       }
 
-      // Move all files in the subtree together
-      this.emitOutput('Moving files...');
+      // Move files from restaurant to merged
+      this.emitOutput('Moving files from restaurant to merged...');
       for (const file of subtree.files) {
-        const srcPath = path.join(srcDir, file);
+        const restaurantPath = path.join(restaurantDir, file);
         const destPath = path.join(destDir, file);
 
-        const sourceFile = project.getSourceFile(srcPath);
+        const sourceFile = project.getSourceFile(restaurantPath);
         if (sourceFile) {
           sourceFile.move(destPath);
           this.emitOutput(`  Moved: ${file}`);
         }
       }
 
-      // OPTION B: Use @aliasMerged pattern
-      // Add merged aliases to tsconfig so @appMerged/* -> merged/src/app/*
-      // Then simply replace @app/ with @appMerged/ in imports
+      // Add merged aliases to BOTH tsconfigs
       const mergedAliases = this.ensureMergedAliases(config);
       this.emitOutput(`Merged aliases available: ${Object.keys(mergedAliases).join(', ')}`);
 
@@ -334,18 +399,15 @@ export class StateManager {
         for (const imp of movedFile.getImportDeclarations()) {
           const specifier = imp.getModuleSpecifierValue();
 
-          // Check if this is a path alias that needs conversion
           for (const [alias, mergedAlias] of Object.entries(mergedAliases)) {
             const aliasPrefix = alias.replace('/*', '/');
             const mergedPrefix = mergedAlias.replace('/*', '/');
 
             if (specifier.startsWith(aliasPrefix) || specifier === alias.replace('/*', '')) {
-              // Check if target was migrated (resolves to restaurant but is in our set)
               const resolved = imp.getModuleSpecifierSourceFile();
               if (resolved) {
                 const resolvedPath = resolved.getFilePath() as string;
                 if (srcToDestMap.has(resolvedPath)) {
-                  // Target was migrated - use merged alias
                   const newSpecifier = specifier.replace(aliasPrefix, mergedPrefix);
                   if (specifier !== newSpecifier) {
                     this.emitOutput(`  ${path.basename(file)}: "${specifier}" → "${newSpecifier}"`);
@@ -359,8 +421,8 @@ export class StateManager {
         }
       }
 
-      // Update imports in external files (staying in restaurant) to use merged aliases
-      this.emitOutput('Updating imports in external files to use merged aliases...');
+      // Update imports in external files (BOTH branches) to use merged aliases
+      this.emitOutput('Updating imports in external files (both branches) to use merged aliases...');
       for (const [extFile, _] of externalDependents) {
         for (const imp of extFile.getImportDeclarations()) {
           const specifier = imp.getModuleSpecifierValue();
@@ -369,8 +431,11 @@ export class StateManager {
 
           const resolvedPath = resolved.getFilePath() as string;
 
-          // If this import points to a migrated file, convert to merged alias
-          if (srcToDestMap.has(resolvedPath.replace(destDir, srcDir)) || srcToDestMap.has(resolvedPath)) {
+          // Check if this import points to a migrated file (check all source paths)
+          if (srcToDestMap.has(resolvedPath) ||
+              srcToDestMap.has(resolvedPath.replace(destDir, restaurantDir)) ||
+              srcToDestMap.has(resolvedPath.replace(destDir, retailDir))) {
+
             // Check if it's a path alias
             for (const [alias, mergedAlias] of Object.entries(mergedAliases)) {
               const aliasPrefix = alias.replace('/*', '/');
@@ -386,18 +451,16 @@ export class StateManager {
               }
             }
 
-            // If it's a relative import pointing to migrated file, convert to merged alias
+            // If it's a relative import, convert to merged alias
             if (specifier.startsWith('.')) {
-              // Find which alias this path would match
-              const targetInMerged = srcToDestMap.get(resolvedPath.replace(destDir, srcDir)) || srcToDestMap.get(resolvedPath);
+              const targetInMerged = srcToDestMap.get(resolvedPath) ||
+                                     srcToDestMap.get(resolvedPath.replace(destDir, restaurantDir)) ||
+                                     srcToDestMap.get(resolvedPath.replace(destDir, retailDir));
               if (targetInMerged) {
-                // Calculate the relative part within src/app or src/environments etc.
                 const mergedRelative = targetInMerged.replace(destDir + '/src/', '');
 
-                // Find matching merged alias
                 for (const [alias, mergedAlias] of Object.entries(mergedAliases)) {
                   const aliasBase = alias.replace('/*', '').replace('@', '');
-                  // e.g., app/* -> check if mergedRelative starts with app/
                   const pathBase = aliasBase === 'app' ? 'app/' :
                                    aliasBase === 'env' ? 'environments/' :
                                    aliasBase + '/';
@@ -421,33 +484,53 @@ export class StateManager {
       this.emitOutput('Saving changes...');
       await project.save();
 
-      // Delete original files
+      // Delete original files from BOTH branches
+      this.emitOutput('Deleting original files from both branches...');
+
+      // Delete from restaurant
       for (const file of subtree.files) {
-        const srcPath = path.join(srcDir, file);
-        if (fs.existsSync(srcPath)) {
-          fs.unlinkSync(srcPath);
+        const restaurantPath = path.join(restaurantDir, file);
+        if (fs.existsSync(restaurantPath)) {
+          fs.unlinkSync(restaurantPath);
         }
       }
+      this.emitOutput(`  Deleted ${subtree.files.length} files from restaurant`);
 
-      // Clean up empty directories
+      // Delete from retail
+      let retailDeleteCount = 0;
       for (const file of subtree.files) {
-        const srcPath = path.join(srcDir, file);
-        let dir = path.dirname(srcPath);
-        while (dir !== srcDir && dir.startsWith(srcDir)) {
-          try {
-            const contents = fs.readdirSync(dir);
-            if (contents.length === 0) {
-              fs.rmdirSync(dir);
-              this.emitOutput(`  Removed empty directory: ${path.relative(srcDir, dir)}`);
-            } else {
+        const retailPath = path.join(retailDir, file);
+        if (fs.existsSync(retailPath)) {
+          fs.unlinkSync(retailPath);
+          retailDeleteCount++;
+        }
+      }
+      this.emitOutput(`  Deleted ${retailDeleteCount} files from retail`);
+
+      // Clean up empty directories in BOTH branches
+      const cleanEmptyDirs = (baseDir: string, branchName: string) => {
+        for (const file of subtree.files) {
+          const filePath = path.join(baseDir, file);
+          let dir = path.dirname(filePath);
+          while (dir !== baseDir && dir.startsWith(baseDir)) {
+            try {
+              const contents = fs.readdirSync(dir);
+              if (contents.length === 0) {
+                fs.rmdirSync(dir);
+                this.emitOutput(`  Removed empty directory: ${branchName}/${path.relative(baseDir, dir)}`);
+              } else {
+                break;
+              }
+              dir = path.dirname(dir);
+            } catch {
               break;
             }
-            dir = path.dirname(dir);
-          } catch {
-            break;
           }
         }
-      }
+      };
+
+      cleanEmptyDirs(restaurantDir, 'restaurant');
+      cleanEmptyDirs(retailDir, 'retail');
 
       // Get current commit hash (before migration)
       const parentHash = execSync('git rev-parse HEAD', {
@@ -464,7 +547,7 @@ export class StateManager {
       });
 
       // Create commit for this migration
-      const commitMsg = `[consolidator] Migrate ${subtree.rootPath} (${subtree.files.length} files)`;
+      const commitMsg = `[consolidator] Migrate ${subtree.rootPath} (${subtree.files.length} files from retail+restaurant)`;
       execSync(`git commit -m "${commitMsg}"`, {
         cwd: config.projectPath,
         encoding: 'utf-8',
@@ -487,7 +570,9 @@ export class StateManager {
         this.state.redoStack = [];
       }
 
-      this.emitOutput(`Migration complete: ${subtree.files.length} files moved`);
+      this.emitOutput(`Migration complete: ${subtree.files.length} files moved to merged`);
+      this.emitOutput(`  Deleted from: retail + restaurant`);
+      this.emitOutput(`  Both tsconfigs updated with @appMerged/* aliases`);
       this.emitOutput(`Commit: ${commitHash.substring(0, 8)}`);
 
       return record;
@@ -551,7 +636,6 @@ export class StateManager {
 
         if (code === 0) {
           this.emitOutput('Build succeeded!');
-          // Mark last migration as built
           const lastMigration = this.state.migrations[this.state.migrations.length - 1];
           if (lastMigration && lastMigration.status === 'migrated') {
             lastMigration.status = 'built';
@@ -570,11 +654,6 @@ export class StateManager {
   }
 
   /**
-   * Rollback to a specific migration (or before it)
-   * @param migrationId - The migration ID to rollback to (rolls back this and all after)
-   *                      If not provided, rolls back just the last migration
-   */
-  /**
    * Rollback (undo) to a specific migration point
    * Rolled-back migrations go to the redo stack
    */
@@ -587,7 +666,6 @@ export class StateManager {
       throw new Error('No migrations to rollback');
     }
 
-    // Find the migration to rollback to
     let targetIndex: number;
     if (migrationId) {
       targetIndex = activeMigrations.findIndex(m => m.id === migrationId);
@@ -604,7 +682,6 @@ export class StateManager {
     this.emitOutput(`Rolling back ${migrationsToRollback.length} migration(s) to before: ${targetMigration.subtreeRoot}`);
 
     try {
-      // Get the parent commit hash (state before the target migration)
       const targetCommit = targetMigration.parentCommitHash;
       if (!targetCommit) {
         throw new Error('Migration has no parent commit hash - cannot rollback');
@@ -612,18 +689,15 @@ export class StateManager {
 
       this.emitOutput(`Resetting to commit: ${targetCommit.substring(0, 8)}`);
 
-      // Hard reset to the parent commit
       execSync(`git reset --hard ${targetCommit}`, {
         cwd: config.projectPath,
         encoding: 'utf-8',
       });
 
-      // Mark migrations as rolled-back and add to redo stack (in reverse order for correct redo)
       for (const m of migrationsToRollback) {
         m.status = 'rolled-back';
       }
 
-      // Add to redo stack in reverse order (so first to redo is at the end)
       this.state.redoStack = [...migrationsToRollback.slice().reverse(), ...this.state.redoStack];
       this.state.currentCommit = targetCommit;
 
@@ -639,7 +713,6 @@ export class StateManager {
 
   /**
    * Fast-forward (redo) to a specific migration
-   * Re-applies migrations from the redo stack
    */
   async fastForward(migrationId?: string): Promise<{ redone: MigrationRecord[] }> {
     const config = this.state.config;
@@ -649,7 +722,6 @@ export class StateManager {
       throw new Error('Nothing to redo');
     }
 
-    // Find how many migrations to redo
     let targetIndex: number;
     if (migrationId) {
       targetIndex = this.state.redoStack.findIndex(m => m.id === migrationId);
@@ -657,18 +729,15 @@ export class StateManager {
         throw new Error(`Migration ${migrationId} not found in redo stack`);
       }
     } else {
-      // Just redo the most recent one (last in stack = first undone)
       targetIndex = this.state.redoStack.length - 1;
     }
 
-    // Get migrations to redo (from end of stack up to and including target)
     const migrationsToRedo = this.state.redoStack.slice(targetIndex);
 
     this.emitOutput(`Redoing ${migrationsToRedo.length} migration(s)`);
 
     try {
-      // The target commit is the commitHash of the last migration to redo
-      const targetMigration = migrationsToRedo[0]; // First in slice = furthest forward
+      const targetMigration = migrationsToRedo[0];
       const targetCommit = targetMigration.commitHash;
 
       if (!targetCommit) {
@@ -677,18 +746,15 @@ export class StateManager {
 
       this.emitOutput(`Fast-forwarding to commit: ${targetCommit.substring(0, 8)}`);
 
-      // Hard reset to the target commit
       execSync(`git reset --hard ${targetCommit}`, {
         cwd: config.projectPath,
         encoding: 'utf-8',
       });
 
-      // Mark migrations as active again and remove from redo stack
       for (const m of migrationsToRedo) {
         m.status = 'migrated';
       }
 
-      // Remove redone migrations from redo stack
       this.state.redoStack = this.state.redoStack.slice(0, targetIndex);
       this.state.currentCommit = targetCommit;
 
@@ -701,23 +767,14 @@ export class StateManager {
     }
   }
 
-  /**
-   * Get active (non-rolled-back) migrations
-   */
   getActiveMigrations(): MigrationRecord[] {
     return this.state.migrations.filter(m => m.status !== 'rolled-back');
   }
 
-  /**
-   * Get redo stack
-   */
   getRedoStack(): MigrationRecord[] {
     return this.state.redoStack;
   }
 
-  /**
-   * Stop current build
-   */
   stopBuild(): void {
     if (this.buildProcess) {
       this.buildProcess.kill('SIGTERM');
@@ -725,13 +782,9 @@ export class StateManager {
     }
   }
 
-  /**
-   * Get errors formatted for copying to Claude
-   */
   getErrorsForClaude(): string {
     const output = this.state.currentBuild.output;
 
-    // Get error lines (broader matching)
     const errorLines = output.filter(line =>
       line.includes('error') ||
       line.includes('Error') ||
@@ -748,9 +801,7 @@ export class StateManager {
       line.includes('Module build failed')
     );
 
-    // Also include last 30 lines of output for context
     const recentOutput = output.slice(-30);
-
     const lastMigration = this.state.migrations[this.state.migrations.length - 1];
 
     return `Build/Migration errors from Branch consolidation:

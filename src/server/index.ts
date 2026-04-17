@@ -199,9 +199,12 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
 
     broadcast({ type: 'output', data: 'Starting analysis...' });
 
+    // Resolve project path to absolute (critical for graph lookups)
+    const projectPath = path.resolve(config.projectPath);
+
     // Scan both retail and restaurant directories
-    const retailAppDir = path.join(config.projectPath, 'apps/retail');
-    const restaurantAppDir = path.join(config.projectPath, 'apps/restaurant');
+    const retailAppDir = path.join(projectPath, 'apps/retail');
+    const restaurantAppDir = path.join(projectPath, 'apps/restaurant');
     const retailSrcDir = path.join(retailAppDir, 'src');
     const restaurantSrcDir = path.join(restaurantAppDir, 'src');
 
@@ -265,13 +268,26 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
       const analysis = graphPath ? graph.getAnalysis(graphPath) : null;
 
       const dependencies = (analysis?.dependencies || [])
-        .filter(d => !d.target.startsWith('external:') && !d.target.startsWith('unresolved:'))
-        .map(d => graph.getAnalysis(d.target)?.relativePath || d.target)
+        .filter(d =>
+          !d.target.startsWith('external:') &&
+          !d.target.startsWith('unresolved:') &&
+          !d.target.startsWith('symbol:') &&
+          !d.target.startsWith('ngrx-')
+        )
+        .map(d => graph.getAnalysis(d.target)?.relativePath)
+        .filter((p): p is string => p !== undefined)
         .filter((p, i, arr) => arr.indexOf(p) === i);
 
       const dependents = graphPath
         ? graph.getDependents(graphPath)
-            .map(d => graph.getAnalysis(d.source)?.relativePath || d.source)
+            .filter(d =>
+              !d.source.startsWith('external:') &&
+              !d.source.startsWith('unresolved:') &&
+              !d.source.startsWith('symbol:') &&
+              !d.source.startsWith('ngrx-')
+            )
+            .map(d => graph.getAnalysis(d.source)?.relativePath)
+            .filter((p): p is string => p !== undefined)
             .filter((p, i, arr) => arr.indexOf(p) === i)
         : [];
 

@@ -1,7 +1,7 @@
 // S7 Classic re-export barrel
 // Allows: import { CommonService, UserService } from '@core/services'
 
-export { CommonService } from '../../../../../merged/src/app/core/services/common.service';
+export { CommonService } from './common.service';
 // export { UserService } from './user.service';
 // export { AuthService } from './auth.service';
 

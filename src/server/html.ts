@@ -812,7 +812,7 @@ export function generateInteractiveHtml(report: AnalysisReport | null, config: S
             <span class="badge \${badgeClass}">\${file.status}</span>
             <div class="list-item-content">
               <div class="list-item-path">\${file.relativePath}</div>
-              <div class="list-item-meta">\${file.dependencyCount || 0} deps · \${file.dependentCount || 0} dependents</div>
+              <div class="list-item-meta">\${(file.dependencies || []).length} dependencies · \${(file.dependents || []).length} dependents</div>
             </div>
             <button class="btn btn-small" onclick="showInGraph('\${file.relativePath}')">Graph</button>
           </div>
