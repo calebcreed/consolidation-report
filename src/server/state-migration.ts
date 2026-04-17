@@ -40,10 +40,11 @@ export async function migrateSubtree(
     status: 'pending',
   };
 
-  // Paths for all three locations
-  const restaurantDir = path.join(config.projectPath, 'apps/restaurant');
-  const retailDir = path.join(config.projectPath, 'apps/retail');
-  const destDir = path.join(config.projectPath, 'apps/merged');
+  // Paths for all three locations (absolute for ts-morph compatibility)
+  const projectPath = path.resolve(config.projectPath);
+  const restaurantDir = path.join(projectPath, 'apps/restaurant');
+  const retailDir = path.join(projectPath, 'apps/retail');
+  const destDir = path.join(projectPath, 'apps/merged');
 
   emit(`Migrating clean subtree: ${subtree.files.length} files`);
   emit(`  From: retail + restaurant → merged`);
@@ -58,13 +59,14 @@ export async function migrateSubtree(
   emit(`Loaded ${project.getSourceFiles().length} source files`);
 
   // Build set of files being migrated
+  // Use absolute paths since ts-morph returns absolute paths
   const migratingFiles = new Set<string>();
   const srcToDestMap = new Map<string, string>();
 
   for (const file of subtree.files) {
-    const restaurantPath = path.join(restaurantDir, file);
-    const retailPath = path.join(retailDir, file);
-    const destPath = path.join(destDir, file);
+    const restaurantPath = path.resolve(restaurantDir, file);
+    const retailPath = path.resolve(retailDir, file);
+    const destPath = path.resolve(destDir, file);
 
     migratingFiles.add(restaurantPath);
     srcToDestMap.set(restaurantPath, destPath);

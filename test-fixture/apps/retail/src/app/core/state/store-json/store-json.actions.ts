@@ -72,3 +72,13 @@ export const loadStoreJsonFailNew = createAction(
   '[StoreJson] Load Store Json Fail New',
   props<{ error: string }>()
 );
+
+// =============================================================
+// RETAIL-ONLY: Extra action added in retail branch
+// This creates a BOTTLENECK - this file is now dirty and blocks
+// all other store-json files from being migrated
+// =============================================================
+export const refreshStoreJsonCache = createAction(
+  '[StoreJson] Refresh Cache',
+  props<{ forceRefresh: boolean }>()
+);

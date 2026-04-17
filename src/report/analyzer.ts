@@ -96,11 +96,29 @@ export class ReportAnalyzer {
       // Skip dependencies that point to merged (already migrated = safe)
       if (depPath.includes('/merged/') || depPath.startsWith('merged:')) continue;
 
-      // If dependency is not in our files map, it might be in merged already
+      // If dependency is not in our files map, it could be:
+      // 1. Already migrated to merged (safe)
+      // 2. A file we couldn't find (unsafe - blocks clean subtree)
       if (!this.files.has(depPath)) {
-        // Check if this looks like an already-migrated file (path to merged)
-        // If it's truly missing/broken, that's a different problem
-        continue;
+        // Try to find a matching file with different path format
+        const match = this.findMatchingFile(depPath);
+        if (match) {
+          // Found a match, check if it's clean
+          const matchedFile = this.files.get(match)!;
+          if (!this.isCleanSubtree(match, visiting)) {
+            file.isCleanSubtree = false;
+            this.cleanSubtreeCache.set(relativePath, false);
+            visiting.delete(relativePath);
+            return false;
+          }
+          continue;
+        }
+        // No match found - this is an untracked dependency, block clean status
+        // (Better to be safe than to migrate broken subtrees)
+        file.isCleanSubtree = false;
+        this.cleanSubtreeCache.set(relativePath, false);
+        visiting.delete(relativePath);
+        return false;
       }
 
       const depClean = this.isCleanSubtree(depPath, visiting);
@@ -116,6 +134,38 @@ export class ReportAnalyzer {
     this.cleanSubtreeCache.set(relativePath, true);
     visiting.delete(relativePath);
     return true;
+  }
+
+  /**
+   * Try to find a file in the files map that matches the given path
+   * Handles cases where paths might have slightly different formats
+   */
+  private findMatchingFile(depPath: string): string | null {
+    // Extract the filename and try to find files ending with it
+    const filename = depPath.split('/').pop() || '';
+    if (!filename) return null;
+
+    // Try exact match with normalized path
+    for (const key of this.files.keys()) {
+      if (key === depPath) return key;
+      // Match by filename at end of path
+      if (key.endsWith('/' + filename) || key === filename) {
+        // Verify the directory structure matches
+        const depParts = depPath.split('/');
+        const keyParts = key.split('/');
+        // Check if last N parts match (where N is length of depPath)
+        const minLen = Math.min(depParts.length, keyParts.length);
+        let matches = true;
+        for (let i = 1; i <= minLen; i++) {
+          if (depParts[depParts.length - i] !== keyParts[keyParts.length - i]) {
+            matches = false;
+            break;
+          }
+        }
+        if (matches) return key;
+      }
+    }
+    return null;
   }
 
   /**

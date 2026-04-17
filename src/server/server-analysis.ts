@@ -88,15 +88,39 @@ export async function runAnalysis(
     const graphPath = restaurantPath || retailPath;
     const analysis = graphPath ? graph.getAnalysis(graphPath) : null;
 
+    // Map dependency targets to relative paths
+    // If a dependency can't be found in the graph, try to compute its relative path
+    // Filter out symbolic/non-file dependencies
     const dependencies = (analysis?.dependencies || [])
       .filter(d =>
         !d.target.startsWith('external:') &&
         !d.target.startsWith('unresolved:') &&
         !d.target.startsWith('symbol:') &&
-        !d.target.startsWith('ngrx-')
+        !d.target.startsWith('ngrx-') &&
+        // Angular template symbolic dependencies
+        !d.target.startsWith('selector:') &&
+        !d.target.startsWith('pipe:') &&
+        !d.target.startsWith('directive:') &&
+        !d.target.startsWith('component:')
       )
-      .map(d => graph.getAnalysis(d.target)?.relativePath)
-      .filter((p): p is string => p !== undefined)
+      .map(d => {
+        // Try to get from graph first
+        const targetAnalysis = graph.getAnalysis(d.target);
+        if (targetAnalysis) {
+          return targetAnalysis.relativePath;
+        }
+        // If not in graph, compute relative path from the target
+        // Target is absolute, we need to make it relative to appDir
+        if (d.target.includes('/apps/restaurant/')) {
+          return d.target.split('/apps/restaurant/')[1];
+        }
+        if (d.target.includes('/apps/retail/')) {
+          return d.target.split('/apps/retail/')[1];
+        }
+        // Keep absolute path as fallback - analyzer will handle it
+        return d.target;
+      })
+      .filter((p): p is string => p !== undefined && p !== '')
       .filter((p, i, arr) => arr.indexOf(p) === i);
 
     const dependents = graphPath
@@ -105,10 +129,27 @@ export async function runAnalysis(
             !d.source.startsWith('external:') &&
             !d.source.startsWith('unresolved:') &&
             !d.source.startsWith('symbol:') &&
-            !d.source.startsWith('ngrx-')
+            !d.source.startsWith('ngrx-') &&
+            // Angular template symbolic dependencies
+            !d.source.startsWith('selector:') &&
+            !d.source.startsWith('pipe:') &&
+            !d.source.startsWith('directive:') &&
+            !d.source.startsWith('component:')
           )
-          .map(d => graph.getAnalysis(d.source)?.relativePath)
-          .filter((p): p is string => p !== undefined)
+          .map(d => {
+            const sourceAnalysis = graph.getAnalysis(d.source);
+            if (sourceAnalysis) {
+              return sourceAnalysis.relativePath;
+            }
+            if (d.source.includes('/apps/restaurant/')) {
+              return d.source.split('/apps/restaurant/')[1];
+            }
+            if (d.source.includes('/apps/retail/')) {
+              return d.source.split('/apps/retail/')[1];
+            }
+            return d.source;
+          })
+          .filter((p): p is string => p !== undefined && p !== '')
           .filter((p, i, arr) => arr.indexOf(p) === i)
       : [];
 
