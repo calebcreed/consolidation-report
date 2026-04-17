@@ -42,11 +42,15 @@ New state modules:
 - `state-git.ts` (125 lines) - Rollback/redo
 - `state-migration.ts` (412 lines) - Migration logic
 
-## Still Large (Future Refactor)
+New server modules:
+- `server-routes.ts` (232 lines) - API route handlers
+- `server-utils.ts` (194 lines) - File comparison, directory scanning
+- `server-analysis.ts` (138 lines) - Analysis logic
+- `server-websocket.ts` (43 lines) - WebSocket management
 
-| Lines | File | Suggested Split |
-|------:|------|-----------------|
-| 621 | `src/server/index.ts` | `routes.ts`, `analysis.ts`, `websocket.ts` |
+## All Large Files Refactored
+
+No files over 500 lines remain in the codebase.
 
 ## What Works
 
