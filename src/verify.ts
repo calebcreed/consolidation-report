@@ -16,7 +16,8 @@ import { GraphBuilder } from './deps/graph';
 import { SemanticComparator } from './diff/comparator';
 import { DiffResult } from './diff/types';
 
-const MODEL_PATH = '/Users/calebcreed/Downloads/test-fixture';
+// Resolve test-fixture relative to project root (where this script is run from)
+const MODEL_PATH = path.resolve(process.cwd(), 'test-fixture');
 const RESTAURANT_APP = path.join(MODEL_PATH, 'apps/restaurant');
 const RETAIL_APP = path.join(MODEL_PATH, 'apps/retail');
 const TSCONFIG_PATH = path.join(RESTAURANT_APP, 'tsconfig.app.json');

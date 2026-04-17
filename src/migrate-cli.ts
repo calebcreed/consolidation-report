@@ -319,7 +319,8 @@ Examples:
   }
 
   // Config
-  const projectPath = '/Users/calebcreed/Downloads/test-fixture';
+  // Resolve test-fixture relative to project root
+  const projectPath = path.resolve(process.cwd(), 'test-fixture');
   const tsconfigPath = path.join(projectPath, 'apps/restaurant/tsconfig.app.json');
 
   console.log('='.repeat(60));

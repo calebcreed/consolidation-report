@@ -2,28 +2,20 @@
 
 ## Last Session Summary (2026-04-17)
 
-Completed a "Weltschmerz test" comparing ambitions vs reality. Found critical issues.
+Verified that the diff normalizer is working correctly. Previous TODO was stale.
 
-## Critical Bug: Diff Normalizer Broken
+## Status: All Core Features Working
 
-The semantic diff normalizer (`src/diff/normalizer.ts` + `comparator.ts`) does NOT work:
+### Verified Working:
+- **D10 (whitespace-only)**: Returns `clean` with reason `whitespace-only`
+- **D11 (comments-only)**: Returns `clean` with reason `comments-only`
+- **D12 (import-order)**: Returns `clean` with reason `import-order-only`
 
-```
-D10: Whitespace-only → returns "dirty" (WRONG, should be "clean")
-D11: Comments-only   → returns "dirty" (WRONG, should be "clean")
-D12: Import-order    → likely broken too
-```
-
-**This defeats a core feature.** We claim to treat cosmetic differences as "clean" but they're all marked as conflicts.
-
-Files to fix:
-- `src/diff/normalizer.ts` (254 lines) - ASTNormalizer class
-- `src/diff/comparator.ts` (513 lines) - SemanticComparator class
-
-Test files:
-- `test-fixture/apps/retail/src/app/diff-examples/d10-whitespace.ts`
-- `test-fixture/apps/restaurant/src/app/diff-examples/d10-whitespace-only.ts`
-- Similar for d11-comments, d12-import-order
+Current analysis results:
+- 42 clean files (36 identical, 2 whitespace-only, 2 comments-only, 2 import-order-only)
+- 7 conflicts
+- 14 restaurant-only
+- 17 retail-only
 
 ## Large Files Needing Refactor
 
@@ -36,12 +28,12 @@ Test files:
 
 ## What Works
 
-Dependency detection is mostly working:
-- 15 of 21 dependency types detected
-- Graph building works
-- Clean subtree detection works
-- Migration works (dual-branch: deletes from both retail AND restaurant)
-- Rollback/redo via git works
+- Dependency detection (15 of 21 types)
+- Graph building
+- **Semantic diff comparison (whitespace, comments, import order)**
+- Clean subtree detection
+- Migration (dual-branch: deletes from both retail AND restaurant)
+- Rollback/redo via git
 
 ## What's Missing
 
@@ -51,12 +43,12 @@ Dependency types not tested/detected:
 - `triple-slash` (/// reference directives)
 - `ngrx-feature` (StoreModule.forFeature)
 
-## Project Structure (After Cleanup)
+## Project Structure
 
 ```
 src/
 ├── deps/           # Dependency detection (working)
-├── diff/           # Semantic comparison (BROKEN - fix normalizer)
+├── diff/           # Semantic comparison (working)
 ├── report/         # Analysis & reporting
 ├── server/         # Interactive dashboard
 │   ├── index.ts    # Express + WebSocket + analysis
@@ -80,6 +72,6 @@ npm test           # Run tests
 
 ## Next Steps (Priority Order)
 
-1. **FIX DIFF NORMALIZER** - Make D10-D12 return "clean" not "dirty"
-2. Refactor large files for AI parseability
-3. Add missing dependency detection (import-type, require, triple-slash)
+1. Refactor large files for AI parseability
+2. Add missing dependency detection (import-type, require, triple-slash)
+3. Test against real webpos-model project

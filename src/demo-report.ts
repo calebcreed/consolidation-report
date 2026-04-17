@@ -15,7 +15,8 @@ import { GraphBuilder } from './deps/graph';
 import { SemanticComparator } from './diff/comparator';
 import { ReportAnalyzer, TerminalReporter, HtmlReporter, FileMatch, FileStatus } from './report';
 
-const MODEL_PATH = '/Users/calebcreed/Downloads/test-fixture';
+// Resolve test-fixture relative to project root
+const MODEL_PATH = path.resolve(process.cwd(), 'test-fixture');
 const RESTAURANT_APP = path.join(MODEL_PATH, 'apps/restaurant');
 const TSCONFIG_PATH = path.join(RESTAURANT_APP, 'tsconfig.app.json');
 
@@ -71,7 +72,7 @@ function createMockFileMatches(graph: import('./deps/graph').DependencyGraph): F
   const matches: FileMatch[] = [];
 
   // Use diff-examples directory for actual diff scenarios if it exists
-  const diffExamplesPath = '/Users/calebcreed/Downloads/test-fixture/apps/restaurant/src/app/diff-examples';
+  const diffExamplesPath = path.join(MODEL_PATH, 'apps/restaurant/src/app/diff-examples');
   const hasDiffExamples = fs.existsSync(diffExamplesPath);
 
   for (const filePath of files) {
