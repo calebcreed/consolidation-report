@@ -488,8 +488,8 @@ export class SemanticComparator {
    * Reorder imports alphabetically for comparison
    */
   private reorderImports(content: string): string {
-    // Extract all import statements
-    const importRegex = /^import\s+.*?;?\s*$/gm;
+    // Extract all import statements (allow leading whitespace)
+    const importRegex = /^[ \t]*import\s+.*?;?\s*$/gm;
     const imports: string[] = [];
     let match;
 

@@ -2,46 +2,49 @@
 
 ## Last Session Summary (2026-04-17)
 
-Verified that the diff normalizer is working correctly. Previous TODO was stale.
+Completed comprehensive audit and testing of all dependency species and diff challenges.
 
-## Status: All Core Features Working
+## Status: All Tests Passing (75/75)
 
-### Verified Working:
-- **D10 (whitespace-only)**: Returns `clean` with reason `whitespace-only`
-- **D11 (comments-only)**: Returns `clean` with reason `comments-only`
-- **D12 (import-order)**: Returns `clean` with reason `import-order-only`
+### Test Coverage
 
-Current analysis results:
-- 42 clean files (36 identical, 2 whitespace-only, 2 comments-only, 2 import-order-only)
-- 7 conflicts
-- 14 restaurant-only
-- 17 retail-only
+**Dependency Species (S1-S11, A1-A12, N1-N5, O1-O4):**
+- All 30+ species now have tests in `src/__tests__/extractor.test.ts`
+- All fixture files created in `test-fixture/apps/restaurant/`
 
-## Large Files Needing Refactor
+**Diff Challenges (D1-D15):**
+- All 15 diff types now have tests in `src/__tests__/comparator.test.ts`
+- D3-D9 (structural changes) tests added: retail-only, restaurant-only, moved, renamed, folder-moved, split, merged
+
+### Recent Fixes
+- Fixed D12 import-order regex to handle leading whitespace
+- Fixed `featureKey` property name (was `featureName`)
+- Updated A10 test to accept `import-dynamic` for lazy routes
+- Created missing fixture files (logger.service.ts, user.ts, side-effects-only.ts, etc.)
+
+## Refactoring Completed
+
+| Before | After | File |
+|-------:|------:|------|
+| 1,243 lines | 29 lines | `src/server/html.ts` → split into `dashboard/` modules |
+
+## Still Large (Future Refactor)
 
 | Lines | File | Suggested Split |
 |------:|------|-----------------|
-| 1,243 | `src/server/html.ts` | `html-template.ts`, `html-scripts.ts`, `html-styles.ts` |
 | 1,071 | `src/deps/extractor.ts` | `extractor-imports.ts`, `extractor-angular.ts`, `extractor-ngrx.ts` |
 | 828 | `src/server/state.ts` | `migration.ts`, `git-ops.ts`, `build-runner.ts` |
 | 621 | `src/server/index.ts` | `routes.ts`, `analysis.ts`, `websocket.ts` |
 
 ## What Works
 
-- Dependency detection (15 of 21 types)
+- Dependency detection (all 30+ species tested)
 - Graph building
-- **Semantic diff comparison (whitespace, comments, import order)**
+- Semantic diff comparison (whitespace, comments, import order)
+- Structural change detection (moved, renamed, split, merged)
 - Clean subtree detection
 - Migration (dual-branch: deletes from both retail AND restaurant)
 - Rollback/redo via git
-
-## What's Missing
-
-Dependency types not tested/detected:
-- `import-type` (TypeScript type-only imports)
-- `require` (CommonJS)
-- `triple-slash` (/// reference directives)
-- `ngrx-feature` (StoreModule.forFeature)
 
 ## Project Structure
 
@@ -52,9 +55,10 @@ src/
 ├── report/         # Analysis & reporting
 ├── server/         # Interactive dashboard
 │   ├── index.ts    # Express + WebSocket + analysis
-│   ├── html.ts     # Dashboard SPA
+│   ├── html.ts     # Thin wrapper (29 lines)
+│   ├── dashboard/  # Modular dashboard components
 │   └── state.ts    # Migration state management
-└── __tests__/      # Jest tests
+└── __tests__/      # Jest tests (75 tests, all passing)
 ```
 
 ## Commands
@@ -72,6 +76,6 @@ npm test           # Run tests
 
 ## Next Steps (Priority Order)
 
-1. Refactor large files for AI parseability
-2. Add missing dependency detection (import-type, require, triple-slash)
-3. Test against real webpos-model project
+1. Refactor remaining large files (extractor.ts, state.ts, index.ts)
+2. Test against real webpos-model project
+3. Add integration tests for full migration workflow
