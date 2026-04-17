@@ -28,17 +28,24 @@ Completed comprehensive audit and testing of all dependency species and diff cha
 |-------:|------:|------|
 | 1,243 lines | 29 lines | `src/server/html.ts` → split into `dashboard/` modules |
 | 1,071 lines | 116 lines | `src/deps/extractor.ts` → orchestration only |
+| 828 lines | 194 lines | `src/server/state.ts` → orchestration only |
 
-New focused modules:
+New extractor modules:
 - `extractor-imports.ts` (237 lines) - S1-S11, O2, O3
 - `extractor-angular.ts` (405 lines) - A1-A12
 - `extractor-ngrx.ts` (409 lines) - N1-N5
+
+New state modules:
+- `state-types.ts` (58 lines) - Interfaces
+- `state-config.ts` (140 lines) - Config & tsconfig handling
+- `state-build.ts` (142 lines) - Build runner
+- `state-git.ts` (125 lines) - Rollback/redo
+- `state-migration.ts` (412 lines) - Migration logic
 
 ## Still Large (Future Refactor)
 
 | Lines | File | Suggested Split |
 |------:|------|-----------------|
-| 828 | `src/server/state.ts` | `migration.ts`, `git-ops.ts`, `build-runner.ts` |
 | 621 | `src/server/index.ts` | `routes.ts`, `analysis.ts`, `websocket.ts` |
 
 ## What Works
