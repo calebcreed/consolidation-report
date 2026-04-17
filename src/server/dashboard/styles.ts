@@ -164,6 +164,18 @@ export const DASHBOARD_STYLES = `
     .graph-indent { display: inline-block; width: 20px; color: #30363d; }
 
     /* Expanded file item */
-    .file-expanded { background: #1c2128; }
+    .file-expanded { background: #1c2128; border-radius: 6px; margin-bottom: 4px; }
     .file-expanded .list-item { border-bottom: none; }
+    .list-item.clickable { cursor: pointer; }
+    .list-item.clickable:hover { background: #262c36; }
+    .expand-hint { color: #6e7681; font-style: italic; margin-left: 8px; }
+
+    /* Dependencies expanded section */
+    .deps-expanded { padding: 12px 16px; background: #0d1117; border-top: 1px solid #30363d; }
+    .deps-section { margin-bottom: 12px; }
+    .deps-section:last-child { margin-bottom: 0; }
+    .deps-section strong { color: #8b949e; font-size: 12px; display: block; margin-bottom: 6px; }
+    .deps-list { list-style: none; margin: 0; padding: 0; }
+    .deps-list li { font-family: monospace; font-size: 12px; color: #58a6ff; padding: 3px 0; padding-left: 12px; border-left: 2px solid #30363d; margin-left: 4px; }
+    .deps-list li:hover { color: #79c0ff; background: #161b22; }
 `;

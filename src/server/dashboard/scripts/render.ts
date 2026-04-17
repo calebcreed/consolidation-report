@@ -114,21 +114,52 @@ export const RENDER_SCRIPT = `
         return;
       }
 
-      filesList.innerHTML = files.map(file => {
+      filesList.innerHTML = files.map((file, idx) => {
         const badgeClass = file.status === 'clean' ? 'badge-clean' :
                           file.status === 'conflict' ? 'badge-conflict' :
                           file.status === 'restaurant-only' ? 'badge-restaurant' : 'badge-retail';
+
+        const deps = file.dependencies || [];
+        const dependents = file.dependents || [];
+        const hasDeps = deps.length > 0 || dependents.length > 0;
+
+        const depsHtml = deps.length > 0
+          ? '<div class="deps-section"><strong>Dependencies (' + deps.length + '):</strong><ul class="deps-list">' +
+            deps.map(d => '<li>' + d + '</li>').join('') + '</ul></div>'
+          : '';
+
+        const dependentsHtml = dependents.length > 0
+          ? '<div class="deps-section"><strong>Dependents (' + dependents.length + '):</strong><ul class="deps-list">' +
+            dependents.map(d => '<li>' + d + '</li>').join('') + '</ul></div>'
+          : '';
+
         return \`
-          <div class="list-item">
-            <span class="badge \${badgeClass}">\${file.status}</span>
-            <div class="list-item-content">
-              <div class="list-item-path">\${file.relativePath}</div>
-              <div class="list-item-meta">\${(file.dependencies || []).length} dependencies · \${(file.dependents || []).length} dependents</div>
+          <div class="file-expanded">
+            <div class="list-item \${hasDeps ? 'clickable' : ''}" \${hasDeps ? 'onclick="toggleFileDeps(' + idx + ')"' : ''}>
+              <span class="badge \${badgeClass}">\${file.status}</span>
+              <div class="list-item-content">
+                <div class="list-item-path">\${file.relativePath}</div>
+                <div class="list-item-meta">
+                  \${deps.length} dependencies · \${dependents.length} dependents
+                  \${hasDeps ? '<span class="expand-hint">(click to expand)</span>' : ''}
+                </div>
+              </div>
+              <button class="btn btn-small" onclick="event.stopPropagation(); showInGraph('\${file.relativePath}')">Graph</button>
             </div>
-            <button class="btn btn-small" onclick="showInGraph('\${file.relativePath}')">Graph</button>
+            <div id="file-deps-\${idx}" class="deps-expanded" style="display: none;">
+              \${depsHtml}
+              \${dependentsHtml}
+            </div>
           </div>
         \`;
       }).join('');
+    }
+
+    function toggleFileDeps(idx) {
+      const el = document.getElementById('file-deps-' + idx);
+      if (el) {
+        el.style.display = el.style.display === 'none' ? 'block' : 'none';
+      }
     }
 
     function renderBottlenecks() {
