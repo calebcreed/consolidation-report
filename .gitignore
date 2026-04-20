@@ -4,3 +4,6 @@ reports/
 *.log
 .DS_Store
 .consolidator-config.json
+
+# Test fixture has its own git repo for migration rollback/redo
+test-fixture/
