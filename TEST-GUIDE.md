@@ -68,7 +68,7 @@ After analysis, check the **stats panel** at top:
 
 ## Card 3: Move Capability
 
-**Goal:** Verify migration moves files and rollback restores them.
+**Goal:** Verify migration moves files, build verifies imports, and rollback restores them.
 
 1. Click the **Clean Subtrees** tab
 2. Find `src/app/shared/shared.module.ts` (2 files)
@@ -79,12 +79,17 @@ After analysis, check the **stats panel** at top:
    - "Migration complete"
    - Commit hash
 
-5. Click **Rollback** button
-6. **Verify output panel shows:**
+5. **Verify build runs automatically:**
+   - Shows: `$ npx tsc -p apps/merged/tsconfig.app.json --noEmit`
+   - Shows: `Build succeeded!`
+   - *(The build verifies that all import paths work after migration)*
+
+6. Click **Rollback** button
+7. **Verify output panel shows:**
    - "Rolling back..."
    - "Rollback complete"
 
-7. *(Optional)* Verify filesystem:
+8. *(Optional)* Verify filesystem:
 ```bash
 # After migrate - files should be in merged:
 ls test-fixture/apps/merged/src/app/shared/
@@ -93,7 +98,7 @@ ls test-fixture/apps/merged/src/app/shared/
 ls test-fixture/apps/restaurant/src/app/shared/
 ```
 
-**Pass criteria:** Migration completes, rollback restores files.
+**Pass criteria:** Migration completes, build succeeds, rollback restores files.
 
 ---
 
@@ -111,6 +116,7 @@ ls test-fixture/apps/restaurant/src/app/shared/
 | Bottleneck: store-json.actions.ts unlocks 6 | ☐ |
 | **Card 3** | |
 | Migrate moves files to merged | ☐ |
+| Build runs and succeeds | ☐ |
 | Rollback restores files | ☐ |
 
 ---
@@ -118,6 +124,5 @@ ls test-fixture/apps/restaurant/src/app/shared/
 ## Notes
 
 - The test fixture includes a deliberate bottleneck: `retail/store-json.actions.ts` has an extra action that doesn't exist in restaurant, making it a conflict that blocks 6 other clean files.
-- **Build errors are expected** - the test fixture is a mock project without a real Nx workspace. The migration itself completes successfully; only the build verification fails.
-- To skip the build, edit `.consolidator-config.json` and change `buildCommand` to `echo 'skipped'`.
-- For real projects, configure the actual build command (e.g., `nx build restaurant`).
+- **Build verification works** - the test fixture uses `tsc --noEmit` with stub type declarations to verify import paths after migration. This catches broken imports without requiring full dependencies.
+- For real projects, configure `buildCommand` in `.consolidator-config.json` (e.g., `nx build restaurant`).
