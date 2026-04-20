@@ -118,4 +118,6 @@ ls test-fixture/apps/restaurant/src/app/shared/
 ## Notes
 
 - The test fixture includes a deliberate bottleneck: `retail/store-json.actions.ts` has an extra action that doesn't exist in restaurant, making it a conflict that blocks 6 other clean files.
-- Build errors after migration are expected - the test fixture doesn't have `nx` installed.
+- **Build errors are expected** - the test fixture is a mock project without a real Nx workspace. The migration itself completes successfully; only the build verification fails.
+- To skip the build, edit `.consolidator-config.json` and change `buildCommand` to `echo 'skipped'`.
+- For real projects, configure the actual build command (e.g., `nx build restaurant`).
