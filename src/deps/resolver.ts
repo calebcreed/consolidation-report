@@ -153,7 +153,9 @@ export class PathResolver {
    * Resolve an import specifier to an absolute path
    */
   resolve(specifier: string, fromFile: string): ResolvedPath {
-    const fromDir = path.dirname(fromFile);
+    // Ensure we're working with absolute paths
+    const absoluteFromFile = path.resolve(fromFile);
+    const fromDir = path.dirname(absoluteFromFile);
 
     // 1. Check if external
     if (this.isExternal(specifier)) {
@@ -277,8 +279,8 @@ export class PathResolver {
    * Resolve a path to an actual file (trying extensions and barrel files)
    */
   private resolveToFile(targetPath: string, originalSpecifier: string): ResolvedPath | null {
-    // Normalize the path
-    targetPath = path.normalize(targetPath);
+    // Ensure absolute and normalized path
+    targetPath = path.resolve(targetPath);
 
     // 1. Try exact path (already has extension)
     if (this.hasCodeExtension(targetPath)) {

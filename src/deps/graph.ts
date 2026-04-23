@@ -273,9 +273,31 @@ export class GraphBuilder {
 
     // Extract dependencies from each file
     for (const file of files) {
-      const analysis = this.extractor.extract(file);
-      nodes.set(analysis.path, analysis);
-      allEdges.push(...analysis.dependencies);
+      // Normalize to absolute path
+      const absoluteFile = path.resolve(file);
+      const analysis = this.extractor.extract(absoluteFile);
+
+      // Ensure consistent key format (normalized absolute path)
+      const normalizedPath = path.normalize(analysis.path);
+      nodes.set(normalizedPath, { ...analysis, path: normalizedPath });
+
+      // Normalize edge paths too
+      for (const dep of analysis.dependencies) {
+        const normalizedDep = {
+          ...dep,
+          source: path.normalize(dep.source),
+          target: dep.target.startsWith('external:') ||
+                  dep.target.startsWith('unresolved:') ||
+                  dep.target.startsWith('symbol:') ||
+                  dep.target.startsWith('selector:') ||
+                  dep.target.startsWith('pipe:') ||
+                  dep.target.startsWith('directive:') ||
+                  dep.target.startsWith('ngrx-')
+            ? dep.target
+            : path.normalize(dep.target),
+        };
+        allEdges.push(normalizedDep);
+      }
     }
 
     return new DependencyGraph(nodes, allEdges);
