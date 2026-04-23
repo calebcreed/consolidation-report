@@ -95,8 +95,10 @@ export class PathResolver {
    * Create a PathResolver from a tsconfig file
    */
   static fromTsconfig(tsconfigPath: string): PathResolver {
-    const tsconfigDir = path.dirname(tsconfigPath);
-    const { baseUrl, paths } = PathResolver.parseTsconfig(tsconfigPath);
+    // CRITICAL: Resolve tsconfig path to absolute first
+    const absoluteTsconfigPath = path.resolve(tsconfigPath);
+    const tsconfigDir = path.dirname(absoluteTsconfigPath);
+    const { baseUrl, paths } = PathResolver.parseTsconfig(absoluteTsconfigPath);
 
     // baseUrl is relative to tsconfig location
     const resolvedBaseUrl = baseUrl ? path.resolve(tsconfigDir, baseUrl) : undefined;
