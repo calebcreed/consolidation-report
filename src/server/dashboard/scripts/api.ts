@@ -171,6 +171,28 @@ export const API_SCRIPT = `
       }
     }
 
+    async function openSubtreeInVSCode(index, mode) {
+      const subtree = REPORT.cleanSubtrees[index];
+      try {
+        const res = await fetch('/api/open-vscode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            files: mode === 'root' ? [subtree.rootPath] : subtree.files,
+            mode: mode
+          }),
+        });
+        if (res.ok) {
+          appendOutput('Opened in VS Code', 'success');
+        } else {
+          const err = await res.json();
+          appendOutput('Failed to open: ' + err.error, 'error');
+        }
+      } catch (e) {
+        appendOutput('Failed to open: ' + e.message, 'error');
+      }
+    }
+
     async function rollbackTo(migrationId) {
       const migration = MIGRATIONS.find(m => m.id === migrationId);
       if (!migration) return;

@@ -102,6 +102,12 @@ export const GRAPH_SCRIPT = `
         .enter().append('circle')
         .attr('r', 8)
         .attr('class', d => 'graph-node-circle ' + d.status)
+        .style('cursor', d => d.status === 'conflict' ? 'pointer' : 'default')
+        .on('click', (event, d) => {
+          if (d.status === 'conflict') {
+            showConflictDiff(d.id);
+          }
+        })
         .call(d3.drag()
           .on('start', dragstarted)
           .on('drag', dragged)
@@ -165,6 +171,28 @@ export const GRAPH_SCRIPT = `
       const container = document.getElementById('graph-svg-container');
       if (container.style.display !== 'block') {
         renderD3Graph();
+      }
+    }
+
+    function showConflictDiff(relativePath) {
+      // Switch to conflicts tab
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      document.querySelector('[data-tab="conflicts"]').classList.add('active');
+      document.getElementById('conflicts').classList.add('active');
+
+      // Find the index of this conflict
+      const conflicts = REPORT.files.filter(f => f.status === 'conflict');
+      const idx = conflicts.findIndex(f => f.relativePath === relativePath);
+
+      if (idx !== -1) {
+        // Show the diff
+        const diffEl = document.getElementById('diff-' + idx);
+        if (diffEl) {
+          diffEl.style.display = 'block';
+          // Scroll to it
+          diffEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
       }
     }
 `;

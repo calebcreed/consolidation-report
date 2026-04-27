@@ -4,6 +4,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import { spawn } from 'child_process';
 import { Router, Request, Response } from 'express';
 import { StateManager, ServerConfig } from './state';
 import { WebSocketManager } from './server-websocket';
@@ -215,6 +216,41 @@ export function createRoutes(
         totalFiles,
         extensions,
       });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // API: Open files in VS Code
+  router.post('/api/open-vscode', (req: Request, res: Response) => {
+    try {
+      const config = stateManager.getConfig();
+      if (!config) {
+        return res.status(400).json({ error: 'No config set' });
+      }
+
+      const { files, mode } = req.body;
+      if (!files || !Array.isArray(files) || files.length === 0) {
+        return res.status(400).json({ error: 'No files specified' });
+      }
+
+      // Resolve files to absolute paths (they come as relative paths like src/app/foo.ts)
+      const projectPath = path.resolve(config.projectPath);
+      const absolutePaths = files.map((f: string) => {
+        // Files are relative to the restaurant branch
+        return path.join(projectPath, 'apps', 'restaurant', f);
+      });
+
+      // Open in VS Code with -n flag for new window
+      const args = ['-n', ...absolutePaths];
+      const child = spawn('code', args, {
+        detached: true,
+        stdio: 'ignore',
+        shell: true
+      });
+      child.unref();
+
+      res.json({ success: true, opened: absolutePaths.length });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

@@ -40,6 +40,8 @@ export const RENDER_SCRIPT = `
               <div class="list-item-path">\${tree.rootPath}</div>
               <div class="list-item-meta">\${tree.files.slice(0, 3).join(', ')}\${tree.files.length > 3 ? '...' : ''}</div>
             </div>
+            <button class="btn btn-small" onclick="openSubtreeInVSCode(\${i}, 'root')" title="Open root file in VS Code">Open Root</button>
+            <button class="btn btn-small" onclick="openSubtreeInVSCode(\${i}, 'all')" title="Open all files in VS Code">Open All</button>
             <button class="btn btn-primary btn-small" onclick="migrateSubtree(\${i})">Migrate</button>
           </div>
         \`).join('');
