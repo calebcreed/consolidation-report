@@ -164,6 +164,16 @@ function createMockFileMatches(graph: import('./deps/graph').DependencyGraph): F
       dependencies,
       dependents,
       linesChanged,
+      // Fix 1.2 fields
+      hasUnresolvedImports: false,
+      unresolvedImports: [],
+      // Fix 1.3 fields
+      hasSymbolicDependencies: false,
+      symbolicDependencyCount: 0,
+      symbolicDependencies: [],
+      // Fix 3.1 fields
+      hasDynamicImports: false,
+      dynamicImports: [],
     });
   }
 

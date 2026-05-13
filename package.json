@@ -21,6 +21,9 @@
     "diff": "^5.1.0",
     "express": "^5.2.1",
     "glob": "^10.3.10",
+    "graphology": "^0.26.0",
+    "graphology-communities-louvain": "^2.0.2",
+    "natural": "^8.1.1",
     "ts-morph": "^21.0.1",
     "ws": "^8.20.0"
   },

@@ -9,8 +9,11 @@ import {
   BottleneckNode,
   SummaryStats,
   AnalysisReport,
+  ValidationResult,
+  ValidationLeak,
 } from './types';
 import { DiffResult } from '../diff/types';
+import { pathsMatch } from '../utils/paths';
 
 export class ReportAnalyzer {
   private files: Map<string, FileMatch> = new Map();
@@ -49,6 +52,106 @@ export class ReportAnalyzer {
   }
 
   /**
+   * Validate clean subtrees before migration (Fix 3.3)
+   *
+   * This is a SAFETY NET that runs before any migration executes.
+   * It re-verifies that every file marked isCleanSubtree=true has
+   * ALL its dependencies also marked as clean subtrees.
+   *
+   * If any leak is found, migration should be ABORTED.
+   *
+   * @param report - The analysis report to validate
+   * @returns ValidationResult with any leaks found
+   */
+  validateBeforeMigration(report: AnalysisReport): ValidationResult {
+    const leaks: ValidationLeak[] = [];
+    let checkedFiles = 0;
+    let checkedDependencies = 0;
+
+    // Build a map for quick lookup
+    const fileMap = new Map<string, FileMatch>();
+    for (const file of report.files) {
+      fileMap.set(file.relativePath, file);
+    }
+
+    // Check every file marked as clean subtree
+    for (const file of report.files) {
+      if (!file.isCleanSubtree) continue;
+      checkedFiles++;
+
+      // Verify ALL dependencies are also clean subtrees
+      for (const depPath of file.dependencies) {
+        checkedDependencies++;
+
+        // Skip external dependencies
+        if (depPath.startsWith('external:')) continue;
+
+        // Find the dependency file
+        const depFile = fileMap.get(depPath) || this.findFileByPath(fileMap, depPath);
+
+        if (!depFile) {
+          // Dependency not in our file list - this is a leak!
+          leaks.push({
+            file: file.relativePath,
+            dependency: depPath,
+            dependencyStatus: 'conflict', // Unknown = treat as conflict
+            reason: 'Dependency not found in analysis (untracked file)',
+          });
+          continue;
+        }
+
+        if (!depFile.isCleanSubtree) {
+          // Dependency is NOT a clean subtree - this is a leak!
+          leaks.push({
+            file: file.relativePath,
+            dependency: depPath,
+            dependencyStatus: depFile.status,
+            reason: `Dependency has status '${depFile.status}' and isCleanSubtree=false`,
+          });
+        }
+      }
+
+      // Also check for unresolved imports (should block but double-check)
+      if (file.hasUnresolvedImports && file.unresolvedImports.length > 0) {
+        for (const unresolved of file.unresolvedImports) {
+          leaks.push({
+            file: file.relativePath,
+            dependency: unresolved,
+            dependencyStatus: 'conflict',
+            reason: 'Unresolved import - cannot verify dependency status',
+          });
+        }
+      }
+    }
+
+    return {
+      valid: leaks.length === 0,
+      leaks,
+      checkedFiles,
+      checkedDependencies,
+    };
+  }
+
+  /**
+   * Helper to find a file by path with fuzzy matching
+   */
+  private findFileByPath(fileMap: Map<string, FileMatch>, depPath: string): FileMatch | null {
+    // Direct lookup
+    if (fileMap.has(depPath)) {
+      return fileMap.get(depPath)!;
+    }
+
+    // Try pathsMatch for normalized comparison
+    for (const [key, file] of fileMap.entries()) {
+      if (pathsMatch(key, depPath)) {
+        return file;
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Mark which files are part of clean subtrees
    * A file is in a clean subtree if:
    * 1. It is clean or same-change
@@ -68,9 +171,12 @@ export class ReportAnalyzer {
       return this.cleanSubtreeCache.get(relativePath)!;
     }
 
-    // Cycle detection
+    // Cycle detection (Fix 1.4)
+    // If we're revisiting a file, it means we're in a circular dependency
+    // Return true (optimistic) - the actual cleanliness check happens at function start
+    // A cycle between clean files is still a clean subtree
     if (visiting.has(relativePath)) {
-      return false;
+      return true;
     }
 
     const file = this.files.get(relativePath);
@@ -81,6 +187,22 @@ export class ReportAnalyzer {
     // Check if file itself is clean
     const selfClean = file.status === 'clean' || file.status === 'same-change';
     if (!selfClean) {
+      file.isCleanSubtree = false;
+      this.cleanSubtreeCache.set(relativePath, false);
+      return false;
+    }
+
+    // Block clean subtree status for files with unresolved imports (Fix 1.2)
+    // These files have dependencies we couldn't track - migration would fail
+    if (file.hasUnresolvedImports) {
+      file.isCleanSubtree = false;
+      this.cleanSubtreeCache.set(relativePath, false);
+      return false;
+    }
+
+    // Block clean subtree for files with ONLY symbolic deps (Fix 1.3)
+    // If a file has symbolic deps but zero tracked file deps, we can't verify its dependencies
+    if (file.hasSymbolicDependencies && file.dependencies.length === 0) {
       file.isCleanSubtree = false;
       this.cleanSubtreeCache.set(relativePath, false);
       return false;
@@ -138,33 +260,54 @@ export class ReportAnalyzer {
 
   /**
    * Try to find a file in the files map that matches the given path
-   * Handles cases where paths might have slightly different formats
+   * STRICT matching to avoid illusory dependencies (Fix 2.3)
+   *
+   * Strategy: Prefer no match over false match. A missed match just blocks
+   * clean subtree (safe). A false match creates illusory dependencies (dangerous).
    */
   private findMatchingFile(depPath: string): string | null {
-    // Extract the filename and try to find files ending with it
     const filename = depPath.split('/').pop() || '';
     if (!filename) return null;
 
-    // Try exact match with normalized path
+    // 1. Try exact match first
+    if (this.files.has(depPath)) return depPath;
+
+    // 2. Try centralized path matching (Fix 2.1)
     for (const key of this.files.keys()) {
-      if (key === depPath) return key;
-      // Match by filename at end of path
-      if (key.endsWith('/' + filename) || key === filename) {
-        // Verify the directory structure matches
-        const depParts = depPath.split('/');
-        const keyParts = key.split('/');
-        // Check if last N parts match (where N is length of depPath)
-        const minLen = Math.min(depParts.length, keyParts.length);
-        let matches = true;
-        for (let i = 1; i <= minLen; i++) {
-          if (depParts[depParts.length - i] !== keyParts[keyParts.length - i]) {
-            matches = false;
-            break;
-          }
-        }
-        if (matches) return key;
-      }
+      if (pathsMatch(key, depPath)) return key;
     }
+
+    // 3. Strict suffix matching - require at least 2 path segments to match
+    //    (filename + at least one parent directory)
+    const depParts = depPath.split('/').filter(p => p.length > 0);
+    if (depParts.length < 2) {
+      // If depPath is just a filename, only match if exactly ONE file has that name
+      const candidates: string[] = [];
+      for (const key of this.files.keys()) {
+        if (key.endsWith('/' + filename) || key === filename) {
+          candidates.push(key);
+        }
+      }
+      // Only return if unambiguous (exactly one match)
+      return candidates.length === 1 ? candidates[0] : null;
+    }
+
+    // Require ALL parts of depPath to match the end of key
+    for (const key of this.files.keys()) {
+      const keyParts = key.split('/').filter(p => p.length > 0);
+      if (keyParts.length < depParts.length) continue;
+
+      let allMatch = true;
+      for (let i = 1; i <= depParts.length; i++) {
+        if (depParts[depParts.length - i] !== keyParts[keyParts.length - i]) {
+          allMatch = false;
+          break;
+        }
+      }
+      if (allMatch) return key;
+    }
+
+    // No confident match - return null (safe default)
     return null;
   }
 

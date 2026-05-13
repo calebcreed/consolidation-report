@@ -24,6 +24,19 @@ export interface FileMatch {
   dependents: string[];      // relativePaths that depend on this file
   // Lines changed (for impact score calculation)
   linesChanged?: number;
+
+  // Unresolved imports tracking (Fix 1.2)
+  hasUnresolvedImports: boolean;
+  unresolvedImports: string[];
+
+  // Symbolic dependencies tracking (Fix 1.3)
+  hasSymbolicDependencies: boolean;
+  symbolicDependencyCount: number;
+  symbolicDependencies: string[];
+
+  // Dynamic imports tracking (Fix 3.1)
+  hasDynamicImports: boolean;
+  dynamicImports: string[];
 }
 
 export interface CleanSubtree {
@@ -60,4 +73,19 @@ export interface AnalysisReport {
   files: FileMatch[];
   cleanSubtrees: CleanSubtree[];  // Ranked by size descending
   bottlenecks: BottleneckNode[];  // Ranked by unlockCount descending
+}
+
+// Fix 3.3: Validation result for pre-migration check
+export interface ValidationLeak {
+  file: string;           // File marked as clean subtree
+  dependency: string;     // Dependency that is NOT clean
+  dependencyStatus: FileStatus;
+  reason: string;
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  leaks: ValidationLeak[];
+  checkedFiles: number;
+  checkedDependencies: number;
 }

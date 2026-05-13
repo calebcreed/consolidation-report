@@ -353,11 +353,16 @@ export class AngularExtractor {
       });
     }
 
-    // A8: Template pipes {{ value | pipeName }}
+    // A8: Template pipes {{ value | pipeName }} (Fix 3.2)
     const pipeRegex = /\|\s*([a-zA-Z][a-zA-Z0-9]*)/g;
     const builtInPipes = [
+      // Common pipes
       'async', 'date', 'uppercase', 'lowercase', 'currency',
-      'number', 'percent', 'json', 'slice', 'keyvalue', 'titlecase'
+      'number', 'percent', 'json', 'slice', 'keyvalue', 'titlecase',
+      // i18n pipes
+      'i18nPlural', 'i18nSelect',
+      // Aliases
+      'decimal',
     ];
 
     while ((match = pipeRegex.exec(content)) !== null) {
@@ -377,17 +382,35 @@ export class AngularExtractor {
       });
     }
 
-    // A9: Template directives [appDirective]
+    // A9: Template directives [appDirective] (Fix 3.2)
     const directiveRegex = /\[([a-z][a-zA-Z]+)\]/g;
+    // Built-in Angular directives and common property bindings to filter out
     const builtInDirectives = [
-      'ngIf', 'ngFor', 'ngSwitch', 'ngClass', 'ngStyle', 'ngModel',
+      // Angular structural/attribute directives
+      'ngIf', 'ngFor', 'ngSwitch', 'ngSwitchCase', 'ngSwitchDefault',
+      'ngClass', 'ngStyle', 'ngModel', 'ngModelChange',
+      'ngTemplateOutlet', 'ngTemplateOutletContext', 'ngComponentOutlet',
+      // Forms module
       'formControl', 'formGroup', 'formControlName', 'formGroupName',
-      'formArrayName', 'routerLink', 'routerLinkActive'
+      'formArrayName', 'ngFormModel', 'ngForm',
+      // Router module
+      'routerLink', 'routerLinkActive', 'routerLinkActiveOptions',
+      'queryParams', 'fragment', 'preserveFragment',
+      // Common property bindings (NOT directives - false positives)
+      'value', 'disabled', 'readonly', 'required', 'placeholder',
+      'checked', 'selected', 'hidden', 'id', 'name', 'type',
+      'src', 'href', 'alt', 'title', 'width', 'height',
+      'min', 'max', 'step', 'pattern', 'maxlength', 'minlength',
+      'tabindex', 'autofocus', 'autocomplete',
+      // Class and style bindings
+      'class', 'style', 'innerHTML', 'innerText', 'textContent',
     ];
 
     while ((match = directiveRegex.exec(content)) !== null) {
       const directiveName = match[1];
       if (builtInDirectives.includes(directiveName)) continue;
+      // Skip class.* and style.* bindings like [class.active] or [style.color]
+      if (directiveName.startsWith('class') || directiveName.startsWith('style')) continue;
 
       const lineOffset = content.slice(0, match.index).split('\n').length - 1;
 
@@ -399,6 +422,31 @@ export class AngularExtractor {
         line: baseLine + lineOffset,
         column: 0,
         metadata: { directiveName },
+      });
+    }
+
+    // A9b: Structural directives *appDirective (Fix 3.2)
+    // These use * prefix syntax: *ngIf, *ngFor, *appCustomDirective
+    const structuralRegex = /\*([a-z][a-zA-Z]+)/g;
+    const builtInStructural = [
+      'ngIf', 'ngFor', 'ngSwitch', 'ngSwitchCase', 'ngSwitchDefault',
+      'ngTemplateOutlet', 'ngComponentOutlet', 'ngPlural', 'ngPluralCase',
+    ];
+
+    while ((match = structuralRegex.exec(content)) !== null) {
+      const directiveName = match[1];
+      if (builtInStructural.includes(directiveName)) continue;
+
+      const lineOffset = content.slice(0, match.index).split('\n').length - 1;
+
+      deps.push({
+        type: 'template-directive',
+        source: filePath,
+        target: `directive:${directiveName}`,
+        specifier: `*${directiveName}`,
+        line: baseLine + lineOffset,
+        column: 0,
+        metadata: { directiveName, structural: true },
       });
     }
   }
