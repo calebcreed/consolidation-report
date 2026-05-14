@@ -34,6 +34,9 @@ export const INIT_SCRIPT = `
     // Init
     loadConfigToForm();
     if (REPORT) renderReport();
+    if (CLUSTERS && CLUSTERS.packages && CLUSTERS.packages.length > 0) {
+      renderClusters();
+    }
     connectWS();
 
     // Load migrations on startup
@@ -46,4 +49,15 @@ export const INIT_SCRIPT = `
         renderTimeline();
       })
       .catch(e => console.error('Failed to load migrations:', e));
+
+    // Load clusters on startup
+    fetch('/api/clusters')
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.packages && data.packages.length > 0) {
+          CLUSTERS = data;
+          renderClusters();
+        }
+      })
+      .catch(e => console.error('Failed to load clusters:', e));
 `;

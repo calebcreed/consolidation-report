@@ -16,7 +16,7 @@ export { generateDashboardScripts } from './scripts';
 /**
  * Generate the complete interactive dashboard HTML
  */
-export function generateDashboardHtml(reportJson: string, configJson: string): string {
+export function generateDashboardHtml(reportJson: string, configJson: string, clustersJson: string = 'null'): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -28,7 +28,7 @@ export function generateDashboardHtml(reportJson: string, configJson: string): s
 </head>
 <body>
   ${DASHBOARD_TEMPLATE}
-  <script>${generateDashboardScripts(reportJson, configJson)}</script>
+  <script>${generateDashboardScripts(reportJson, configJson, clustersJson)}</script>
 </body>
 </html>`;
 }

@@ -73,6 +73,66 @@ export const WEBSOCKET_SCRIPT = `
             REPORT = msg.data.report;
             renderReport();
           }
+          if (msg.data.clusters) {
+            CLUSTERS = msg.data.clusters;
+            if (CLUSTERS && CLUSTERS.packages && CLUSTERS.packages.length > 0) {
+              renderClusters();
+            }
+          }
+          break;
+
+        // Clustering messages
+        case 'cluster-start':
+          document.getElementById('cluster-progress-text').textContent = 'Starting clustering for ' + msg.data.fileCount + ' files...';
+          break;
+
+        case 'cluster-progress':
+          const progress = msg.data;
+          document.getElementById('cluster-progress-text').textContent = progress.message;
+
+          if (progress.type === 'community-assigned') {
+            animateCommunityAssignment(progress.data);
+          }
+          break;
+
+        case 'cluster-complete':
+          CLUSTERS = msg.data;
+          // Delay to let animation finish
+          setTimeout(() => {
+            renderClusters();
+          }, 1000);
+          break;
+
+        case 'cluster-renamed':
+          if (CLUSTERS) {
+            const pkg = CLUSTERS.packages.find(p => p.id === msg.data.id);
+            if (pkg) pkg.name = msg.data.name;
+          }
+          break;
+
+        case 'cluster-file-moved':
+          if (CLUSTERS) {
+            const { file, from, to } = msg.data;
+
+            // Remove from source
+            if (from === 'unassigned') {
+              CLUSTERS.unassignedFiles = CLUSTERS.unassignedFiles.filter(f => f !== file);
+            } else {
+              const fromPkg = CLUSTERS.packages.find(p => p.id === parseInt(from, 10));
+              if (fromPkg) fromPkg.files = fromPkg.files.filter(f => f !== file);
+            }
+
+            // Add to destination
+            if (to === 'unassigned') {
+              CLUSTERS.unassignedFiles.push(file);
+            } else {
+              const toPkg = CLUSTERS.packages.find(p => p.id === parseInt(to, 10));
+              if (toPkg) toPkg.files.push(file);
+            }
+
+            // Re-render
+            renderClusters();
+          }
           break;
       }
     }

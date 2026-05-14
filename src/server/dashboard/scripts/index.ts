@@ -10,6 +10,7 @@ import { API_SCRIPT } from './api';
 import { RENDER_SCRIPT } from './render';
 import { GRAPH_SCRIPT } from './graph';
 import { TIMELINE_SCRIPT } from './timeline';
+import { CLUSTER_SCRIPT } from './cluster';
 import { INIT_SCRIPT } from './init';
 
 /**
@@ -17,11 +18,12 @@ import { INIT_SCRIPT } from './init';
  * @param reportJson - Serialized report data
  * @param configJson - Serialized config data
  */
-export function generateDashboardScripts(reportJson: string, configJson: string): string {
+export function generateDashboardScripts(reportJson: string, configJson: string, clustersJson: string): string {
   return `
     // Initial data from server
     let REPORT = ${reportJson};
     let CONFIG = ${configJson};
+    let CLUSTERS = ${clustersJson};
     let MIGRATIONS = [];
     let REDO_STACK = [];
     let CURRENT_COMMIT = null;
@@ -33,6 +35,7 @@ export function generateDashboardScripts(reportJson: string, configJson: string)
     ${RENDER_SCRIPT}
     ${GRAPH_SCRIPT}
     ${TIMELINE_SCRIPT}
+    ${CLUSTER_SCRIPT}
     ${INIT_SCRIPT}
   `;
 }

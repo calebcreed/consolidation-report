@@ -39,6 +39,34 @@ export interface ServerState {
   currentCommit: string | null;
   currentBuild: BuildState;
   lastError: string | null;
+  clusters: ClusterState;
+}
+
+// ============ Cluster State Types ============
+
+export interface WorkPackageState {
+  id: number;
+  name: string;  // Editable
+  files: string[];
+  cohesion: number;
+  internalEdges: number;
+  externalEdges: number;
+}
+
+export interface ClusterState {
+  packages: WorkPackageState[];
+  unassignedFiles: string[];
+  runAt: string | null;
+  params: { resolution: number; topologicalWeight: number } | null;
+}
+
+export function createInitialClusterState(): ClusterState {
+  return {
+    packages: [],
+    unassignedFiles: [],
+    runAt: null,
+    params: null,
+  };
 }
 
 export function createInitialState(): ServerState {
@@ -54,5 +82,6 @@ export function createInitialState(): ServerState {
       exitCode: null,
     },
     lastError: null,
+    clusters: createInitialClusterState(),
   };
 }

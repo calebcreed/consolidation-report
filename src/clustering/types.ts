@@ -99,11 +99,20 @@ export interface TuningAttempt {
 }
 
 /**
- * Options for combined clustering (topological + content)
+ * Options for combined clustering (topological + content + path)
  */
 export interface CombinedClusteringOptions extends ClusteringOptions {
-  /** Weight for topological similarity (0-1, default: 0.6) */
+  /** Weight for topological similarity (0-1, default: 0.5) */
   topologicalWeight?: number;
+
+  /** Weight for content/TF-IDF similarity (0-1, default: 0.2) */
+  contentWeight?: number;
+
+  /** Weight for path/directory similarity (0-1, default: 0.3) */
+  pathWeight?: number;
+
+  /** Bonus added for direct import relationships (default: 0.2) */
+  directDepBoost?: number;
 
   /** Minimum combined similarity to consider files related (default: 0.1) */
   minSimilarity?: number;
@@ -134,6 +143,8 @@ export interface CombinedClusteringResult extends ClusteringResult {
   weights: {
     topological: number;
     content: number;
+    path: number;
+    directDepBoost: number;
   };
 
   /** Package quality metrics */

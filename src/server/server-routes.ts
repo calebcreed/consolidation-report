@@ -11,6 +11,7 @@ import { WebSocketManager } from './server-websocket';
 import { runAnalysis } from './server-analysis';
 import { discoverFileTypes } from './server-utils';
 import { generateInteractiveHtml } from './html';
+import { runClusteringWithProgress } from './server-clustering';
 
 export function createRoutes(
   stateManager: StateManager,
@@ -67,6 +68,44 @@ export function createRoutes(
       return res.status(404).json({ error: 'No report available. Run analysis first.' });
     }
     res.json(report);
+  });
+
+  // API: Load mock test data (for testing clustering)
+  router.post('/api/load-test-data', (req: Request, res: Response) => {
+    try {
+      const mockPath = path.join(process.cwd(), 'test-cluster-data', 'mock-report.json');
+      if (!fs.existsSync(mockPath)) {
+        return res.status(404).json({ error: 'Mock report not found. Run: node scripts/test-clustering.js first' });
+      }
+
+      const mockData = JSON.parse(fs.readFileSync(mockPath, 'utf-8'));
+
+      // Convert to report format
+      const report = {
+        generatedAt: new Date().toISOString(),
+        files: mockData.files.map((f: any) => ({
+          ...f,
+          absolutePath: path.join(process.cwd(), 'test-cluster-data', 'src', 'app', f.relativePath),
+        })),
+        stats: {
+          totalFiles: mockData.files.length,
+          conflictFiles: mockData.files.length,
+          retailOnlyFiles: 0,
+          restaurantOnlyFiles: 0,
+          identicalFiles: 0,
+        },
+        cleanSubtrees: [],
+        bottlenecks: [],
+      };
+
+      stateManager.setReport(report as any);
+      wsManager.broadcast({ type: 'report', data: report });
+      wsManager.output(`Loaded ${report.files.length} test files for clustering demo`);
+
+      res.json({ success: true, fileCount: report.files.length });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // API: Migrate a subtree
@@ -256,11 +295,95 @@ export function createRoutes(
     }
   });
 
+  // ============ Clustering Routes ============
+
+  // API: Run clustering
+  router.post('/api/cluster', async (req: Request, res: Response) => {
+    try {
+      const { resolution, topologicalWeight } = req.body || {};
+
+      wsManager.output('Starting clustering...');
+
+      const clusters = await runClusteringWithProgress(
+        stateManager,
+        wsManager,
+        { resolution, topologicalWeight }
+      );
+
+      res.json(clusters);
+    } catch (e: any) {
+      wsManager.output(`Clustering error: ${e.message}`);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // API: Get current cluster state
+  router.get('/api/clusters', (req: Request, res: Response) => {
+    res.json(stateManager.getClusters());
+  });
+
+  // API: Rename a cluster
+  router.patch('/api/cluster/:id/name', (req: Request, res: Response) => {
+    try {
+      const idParam = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const clusterId = parseInt(idParam, 10);
+      const { name } = req.body;
+
+      if (!name || typeof name !== 'string') {
+        return res.status(400).json({ error: 'Name is required' });
+      }
+
+      const success = stateManager.renameCluster(clusterId, name);
+      if (!success) {
+        return res.status(404).json({ error: 'Cluster not found' });
+      }
+
+      wsManager.broadcast({
+        type: 'cluster-renamed',
+        data: { id: clusterId, name },
+      });
+
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // API: Move file between clusters
+  router.post('/api/cluster/move', (req: Request, res: Response) => {
+    try {
+      const { file, fromClusterId, toClusterId } = req.body;
+
+      if (!file || typeof file !== 'string') {
+        return res.status(400).json({ error: 'File path is required' });
+      }
+
+      // null means unassigned
+      const from = fromClusterId === 'unassigned' ? null : parseInt(fromClusterId, 10);
+      const to = toClusterId === 'unassigned' ? null : parseInt(toClusterId, 10);
+
+      const success = stateManager.moveFile(file, from, to);
+      if (!success) {
+        return res.status(400).json({ error: 'Failed to move file' });
+      }
+
+      wsManager.broadcast({
+        type: 'cluster-file-moved',
+        data: { file, from: fromClusterId, to: toClusterId },
+      });
+
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Serve the interactive HTML report
   router.get('/', (req: Request, res: Response) => {
     const report = stateManager.getReport();
     const config = stateManager.getConfig();
-    const html = generateInteractiveHtml(report, config);
+    const clusters = stateManager.getClusters();
+    const html = generateInteractiveHtml(report, config, clusters);
     res.type('html').send(html);
   });
 

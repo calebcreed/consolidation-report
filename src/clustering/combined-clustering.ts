@@ -13,6 +13,8 @@ import {
   buildCombinedSimilarityMatrix,
   buildFilePathMap,
   computeGroupCohesion,
+  SimilarityMatrixOptions,
+  DEFAULT_SIMILARITY_OPTIONS,
 } from './similarity-matrix';
 import {
   WorkPackage,
@@ -31,15 +33,29 @@ const DEFAULT_OPTIONS: Required<CombinedClusteringOptions> = {
   resolution: 1.0,
   autoTune: true,
   includeIsolated: true,
-  topologicalWeight: 0.6,
+  topologicalWeight: 0.5,
+  contentWeight: 0.2,
+  pathWeight: 0.3,
+  directDepBoost: 0.2,
   minSimilarity: 0.1,
 };
 
 /** Resolution values for grid search */
-const RESOLUTION_GRID = [0.6, 0.8, 1.0, 1.2, 1.5, 2.0];
+const RESOLUTION_GRID = [0.6, 0.8, 1.0, 1.2, 1.5];
 
-/** Topological weight values for grid search */
-const WEIGHT_GRID = [0.4, 0.5, 0.6, 0.7, 0.8];
+/** Weight configurations for grid search [topo, content, path] */
+const WEIGHT_CONFIGS = [
+  // Original style (topo + content only)
+  { topo: 0.7, content: 0.3, path: 0.0, directDep: 0.0 },
+  // Balanced with path
+  { topo: 0.4, content: 0.2, path: 0.4, directDep: 0.1 },
+  { topo: 0.5, content: 0.2, path: 0.3, directDep: 0.2 },
+  { topo: 0.5, content: 0.1, path: 0.4, directDep: 0.2 },
+  // Path-heavy (same dir = likely same cluster)
+  { topo: 0.3, content: 0.1, path: 0.6, directDep: 0.2 },
+  // Topo-heavy with path assist
+  { topo: 0.6, content: 0.1, path: 0.3, directDep: 0.3 },
+];
 
 /**
  * Cluster conflict files using combined topological + content similarity.
@@ -73,13 +89,19 @@ export function clusterWithCombinedSimilarity(
   // Build file path map for graph lookups
   const fileToAbsPath = buildFilePathMap(conflictFiles, depGraph);
 
-  // Build combined similarity matrix
+  // Build combined similarity matrix with all weights
   const simMatrix = buildCombinedSimilarityMatrix(
     conflictFiles,
     depGraph,
     tfidfIndex,
     opts.topologicalWeight,
-    fileToAbsPath
+    fileToAbsPath,
+    {
+      topologicalWeight: opts.topologicalWeight,
+      contentWeight: opts.contentWeight,
+      pathWeight: opts.pathWeight,
+      directDepBoost: opts.directDepBoost,
+    }
   );
 
   // Create weighted graph
@@ -92,10 +114,20 @@ export function clusterWithCombinedSimilarity(
   });
 
   // Build work packages from communities
-  const packages = buildWorkPackages(conflictFiles, communities, simMatrix, graph);
+  let packages = buildWorkPackages(conflictFiles, communities, simMatrix, graph);
 
-  // Identify isolated files
-  const isolatedFiles = findIsolatedFiles(conflictFiles, graph);
+  // Identify isolated files (no edges in graph)
+  let isolatedFiles = findIsolatedFiles(conflictFiles, graph);
+
+  // Post-process: detect "false clusters" formed by path similarity
+  // where ALL members have no real dependencies
+  const { packages: realPackages, newIsolated } = detectFalseClusters(
+    packages,
+    depGraph,
+    fileToAbsPath
+  );
+  packages = realPackages;
+  isolatedFiles = [...new Set([...isolatedFiles, ...newIsolated])];
 
   // Compute quality metrics
   const quality = computeQualityMetrics(packages, simMatrix, conflictFiles);
@@ -112,7 +144,9 @@ export function clusterWithCombinedSimilarity(
     isolatedFiles,
     weights: {
       topological: opts.topologicalWeight,
-      content: 1 - opts.topologicalWeight,
+      content: opts.contentWeight,
+      path: opts.pathWeight,
+      directDepBoost: opts.directDepBoost,
     },
     quality,
   };
@@ -131,24 +165,32 @@ export function autoTuneCombinedClustering(
   const allAttempts: CombinedTuningAttempt[] = [];
 
   let bestScore = -Infinity;
-  let bestParams = { resolution: 1.0, topologicalWeight: 0.6 };
+  let bestParams = { resolution: 1.0, topologicalWeight: 0.5 };
   let bestResult: CombinedClusteringResult | null = null;
 
-  // Grid search over resolution and weight
+  // Grid search over resolution and weight configs
   for (const resolution of RESOLUTION_GRID) {
-    for (const topologicalWeight of WEIGHT_GRID) {
+    for (const weights of WEIGHT_CONFIGS) {
       const result = clusterWithCombinedSimilarity(
         depGraph,
         conflictFiles,
         fileContents,
-        { ...opts, resolution, topologicalWeight, autoTune: false }
+        {
+          ...opts,
+          resolution,
+          topologicalWeight: weights.topo,
+          contentWeight: weights.content,
+          pathWeight: weights.path,
+          directDepBoost: weights.directDep,
+          autoTune: false,
+        }
       );
 
       const score = scoreClusteringResult(result, opts);
 
       allAttempts.push({
         resolution,
-        topologicalWeight,
+        topologicalWeight: weights.topo,
         packageCount: result.packageCount,
         modularity: result.modularity,
         score: Math.round(score * 100) / 100,
@@ -156,7 +198,7 @@ export function autoTuneCombinedClustering(
 
       if (score > bestScore) {
         bestScore = score;
-        bestParams = { resolution, topologicalWeight };
+        bestParams = { resolution, topologicalWeight: weights.topo };
         bestResult = result;
       }
     }
@@ -294,6 +336,52 @@ function findIsolatedFiles(files: string[], graph: Graph): string[] {
 }
 
 /**
+ * Detect "false clusters" formed by path similarity where ALL members
+ * have no real code dependencies (no imports, no importers).
+ * These should be moved to isolatedFiles instead.
+ */
+function detectFalseClusters(
+  packages: WorkPackage[],
+  depGraph: DependencyGraph,
+  fileToAbsPath: Map<string, string>
+): { packages: WorkPackage[]; newIsolated: string[] } {
+  const realPackages: WorkPackage[] = [];
+  const newIsolated: string[] = [];
+
+  for (const pkg of packages) {
+    // Check if ALL files in this package have zero deps and zero dependents
+    let allIsolated = true;
+
+    for (const file of pkg.files) {
+      const absPath = fileToAbsPath.get(file);
+      if (!absPath) continue;
+
+      const analysis = depGraph.getAnalysis(absPath);
+      const dependents = depGraph.getDependents(absPath);
+
+      // Count real dependencies (not external/unresolved)
+      const realDeps = analysis?.dependencies.filter(
+        d => !d.target.startsWith('external:') && !d.target.startsWith('unresolved:')
+      ) || [];
+
+      if (realDeps.length > 0 || dependents.length > 0) {
+        allIsolated = false;
+        break;
+      }
+    }
+
+    if (allIsolated && pkg.files.length > 1) {
+      // This cluster has no real dependencies - split into isolated
+      newIsolated.push(...pkg.files);
+    } else {
+      realPackages.push(pkg);
+    }
+  }
+
+  return { packages: realPackages, newIsolated };
+}
+
+/**
  * Compute quality metrics for clustering result
  */
 function computeQualityMetrics(
@@ -414,7 +502,9 @@ function createEmptyResult(opts: Required<CombinedClusteringOptions>): CombinedC
     isolatedFiles: [],
     weights: {
       topological: opts.topologicalWeight,
-      content: 1 - opts.topologicalWeight,
+      content: opts.contentWeight,
+      path: opts.pathWeight,
+      directDepBoost: opts.directDepBoost,
     },
     quality: {
       avgCohesion: 0,

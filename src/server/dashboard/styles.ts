@@ -178,4 +178,134 @@ export const DASHBOARD_STYLES = `
     .deps-list { list-style: none; margin: 0; padding: 0; }
     .deps-list li { font-family: monospace; font-size: 12px; color: #58a6ff; padding: 3px 0; padding-left: 12px; border-left: 2px solid #30363d; margin-left: 4px; }
     .deps-list li:hover { color: #79c0ff; background: #161b22; }
+
+    /* Cluster UI */
+    .cluster-cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+
+    .cluster-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      overflow: hidden;
+      transition: all 0.15s ease;
+    }
+    .cluster-card:hover { border-color: #484f58; }
+    .cluster-card.drag-over { border-color: #58a6ff; background: #1c2433; }
+
+    .cluster-card-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid #30363d;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .cluster-name {
+      font-weight: 600;
+      color: #c9d1d9;
+      font-size: 14px;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid transparent;
+      background: transparent;
+      flex: 1;
+      min-width: 0;
+    }
+    .cluster-name:hover { background: #21262d; border-color: #30363d; }
+    .cluster-name:focus { outline: none; border-color: #58a6ff; background: #0d1117; }
+    .cluster-name[contenteditable="true"] { cursor: text; }
+
+    .cluster-metrics { display: flex; gap: 8px; align-items: center; }
+    .cluster-metric { font-size: 11px; color: #8b949e; }
+    .cluster-metric-value { color: #c9d1d9; font-weight: 500; }
+
+    .cluster-mini-graph {
+      height: 120px;
+      background: #0d1117;
+      position: relative;
+    }
+    .cluster-mini-graph svg { width: 100%; height: 100%; }
+
+    .cluster-files {
+      max-height: 200px;
+      overflow-y: auto;
+      padding: 8px;
+    }
+
+    .cluster-file {
+      font-family: monospace;
+      font-size: 11px;
+      color: #8b949e;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: grab;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: all 0.1s ease;
+    }
+    .cluster-file:hover { background: #21262d; color: #c9d1d9; }
+    .cluster-file.dragging { opacity: 0.5; cursor: grabbing; }
+
+    .cluster-file-count {
+      padding: 8px 16px;
+      border-top: 1px solid #21262d;
+      font-size: 11px;
+      color: #8b949e;
+      text-align: center;
+    }
+
+    /* Unassigned column */
+    .unassigned-column {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      height: fit-content;
+      max-height: 600px;
+      display: flex;
+      flex-direction: column;
+    }
+    .unassigned-column.drag-over { border-color: #58a6ff; background: #1c2433; }
+
+    .unassigned-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid #30363d;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .unassigned-header h4 { font-size: 13px; color: #c9d1d9; margin: 0; }
+
+    .unassigned-files-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+    }
+
+    .unassigned-empty {
+      padding: 20px;
+      text-align: center;
+      color: #484f58;
+      font-size: 12px;
+    }
+
+    /* Cluster graph node animation */
+    .cluster-node { transition: all 0.3s ease; }
+    .cluster-node.assigned { transform: scale(1.1); }
+    .cluster-link { stroke: #30363d; stroke-opacity: 0.4; }
+
+    /* Community colors */
+    .community-0 { fill: #3fb950; stroke: #3fb950; }
+    .community-1 { fill: #58a6ff; stroke: #58a6ff; }
+    .community-2 { fill: #a371f7; stroke: #a371f7; }
+    .community-3 { fill: #f0883e; stroke: #f0883e; }
+    .community-4 { fill: #db61a2; stroke: #db61a2; }
+    .community-5 { fill: #7ee787; stroke: #7ee787; }
+    .community-6 { fill: #79c0ff; stroke: #79c0ff; }
+    .community-7 { fill: #d2a8ff; stroke: #d2a8ff; }
+    .community-8 { fill: #ffa657; stroke: #ffa657; }
+    .community-9 { fill: #ff7b72; stroke: #ff7b72; }
+    .community-unassigned { fill: #484f58; stroke: #6e7681; }
 `;

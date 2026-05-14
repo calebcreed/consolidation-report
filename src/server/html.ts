@@ -18,12 +18,17 @@
  */
 
 import { AnalysisReport } from '../report/types';
-import { ServerConfig } from './state';
+import { ServerConfig, ClusterState } from './state';
 import { generateDashboardHtml } from './dashboard';
 
-export function generateInteractiveHtml(report: AnalysisReport | null, config: ServerConfig | null): string {
+export function generateInteractiveHtml(
+  report: AnalysisReport | null,
+  config: ServerConfig | null,
+  clusters?: ClusterState | null
+): string {
   const reportJson = report ? JSON.stringify(report) : 'null';
   const configJson = config ? JSON.stringify(config) : 'null';
+  const clustersJson = clusters ? JSON.stringify(clusters) : 'null';
 
-  return generateDashboardHtml(reportJson, configJson);
+  return generateDashboardHtml(reportJson, configJson, clustersJson);
 }

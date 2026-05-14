@@ -90,6 +90,7 @@ export const DASHBOARD_TEMPLATE = `
           <button class="tab" data-tab="graph">Graph</button>
           <button class="tab" data-tab="bottlenecks">Bottlenecks</button>
           <button class="tab" data-tab="timeline">Timeline</button>
+          <button class="tab" data-tab="clusters">Clusters</button>
         </div>
 
         <div id="discovery" class="tab-content">
@@ -178,6 +179,51 @@ export const DASHBOARD_TEMPLATE = `
             <div class="empty-state">
               <div class="empty-state-icon">📜</div>
               <div>No migrations yet. Migrate a subtree to see the timeline.</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="clusters" class="tab-content">
+          <p class="subtitle">Group conflict files into work packages using AI clustering.</p>
+
+          <!-- Run button and controls -->
+          <div class="cluster-controls" style="margin-bottom: 16px; display: flex; gap: 12px; align-items: center;">
+            <button class="btn btn-primary" id="btn-run-cluster" onclick="runClustering()">Run Clustering</button>
+            <button class="btn" id="btn-load-test" onclick="loadTestData()" style="background: #238636;">Load Test Data (80 files)</button>
+            <span id="cluster-status" style="color: #8b949e; font-size: 13px;"></span>
+          </div>
+
+          <!-- Animation container (shown during clustering) -->
+          <div id="cluster-animation" style="display: none;">
+            <div id="cluster-graph-container" style="width: 100%; height: 400px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; position: relative;">
+              <svg id="cluster-graph-svg" style="width: 100%; height: 100%;"></svg>
+              <div class="graph-legend" id="cluster-legend" style="position: absolute; top: 10px; right: 10px; background: #161b22; padding: 10px; border-radius: 6px; border: 1px solid #30363d; font-size: 11px;"></div>
+            </div>
+            <div id="cluster-progress-text" style="margin-top: 12px; color: #8b949e; font-size: 13px;"></div>
+          </div>
+
+          <!-- Cluster workspace (shown after clustering) -->
+          <div id="cluster-workspace" style="display: none;">
+            <div style="display: grid; grid-template-columns: 1fr 280px; gap: 16px;">
+              <!-- Cluster cards grid -->
+              <div id="cluster-cards" class="cluster-cards-grid"></div>
+
+              <!-- Unassigned files sidebar -->
+              <div id="unassigned-column" class="unassigned-column">
+                <div class="unassigned-header">
+                  <h4>Unassigned Files</h4>
+                  <span id="unassigned-count" class="badge badge-blue">0</span>
+                </div>
+                <div id="unassigned-files" class="unassigned-files-list"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Empty state -->
+          <div id="cluster-empty" class="list-container">
+            <div class="empty-state">
+              <div class="empty-state-icon">🔗</div>
+              <div>Run analysis first, then click "Run Clustering" to group conflict files into work packages.</div>
             </div>
           </div>
         </div>

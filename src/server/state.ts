@@ -13,14 +13,17 @@ import {
   ServerState,
   ServerConfig,
   MigrationRecord,
+  ClusterState,
+  WorkPackageState,
   createInitialState,
+  createInitialClusterState,
 } from './state-types';
 import { ConfigManager } from './state-config';
 import { migrateSubtree } from './state-migration';
 import { BuildRunner } from './state-build';
 import { rollback, fastForward } from './state-git';
 
-export { ServerState, ServerConfig, MigrationRecord } from './state-types';
+export { ServerState, ServerConfig, MigrationRecord, ClusterState, WorkPackageState } from './state-types';
 
 export class StateManager {
   private state: ServerState = createInitialState();
@@ -188,6 +191,57 @@ export class StateManager {
   getErrorsForClaude(): string {
     const lastMigration = this.state.migrations[this.state.migrations.length - 1];
     return this.buildRunner.getErrorsForClaude(lastMigration, this.state.lastError);
+  }
+
+  // ============ Cluster State ============
+
+  getClusters(): ClusterState {
+    return this.state.clusters;
+  }
+
+  setClusters(clusters: ClusterState): void {
+    this.state.clusters = clusters;
+  }
+
+  renameCluster(clusterId: number, newName: string): boolean {
+    const pkg = this.state.clusters.packages.find(p => p.id === clusterId);
+    if (!pkg) return false;
+    pkg.name = newName;
+    return true;
+  }
+
+  moveFile(file: string, fromClusterId: number | null, toClusterId: number | null): boolean {
+    // Remove from source
+    if (fromClusterId === null) {
+      // From unassigned
+      const idx = this.state.clusters.unassignedFiles.indexOf(file);
+      if (idx === -1) return false;
+      this.state.clusters.unassignedFiles.splice(idx, 1);
+    } else {
+      // From a cluster
+      const fromPkg = this.state.clusters.packages.find(p => p.id === fromClusterId);
+      if (!fromPkg) return false;
+      const idx = fromPkg.files.indexOf(file);
+      if (idx === -1) return false;
+      fromPkg.files.splice(idx, 1);
+    }
+
+    // Add to destination
+    if (toClusterId === null) {
+      // To unassigned
+      this.state.clusters.unassignedFiles.push(file);
+    } else {
+      // To a cluster
+      const toPkg = this.state.clusters.packages.find(p => p.id === toClusterId);
+      if (!toPkg) return false;
+      toPkg.files.push(file);
+    }
+
+    return true;
+  }
+
+  clearClusters(): void {
+    this.state.clusters = createInitialClusterState();
   }
 }
 

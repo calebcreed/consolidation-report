@@ -1,0 +1,658 @@
+{
+  "files": [
+    {
+      "relativePath": "auth/auth.config.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\n\n@Injectable({ providedIn: 'root' })\nexport class AuthConfig {\n  readonly apiBaseUrl = '/api';\n  readonly loginRoute = '/login';\n  readonly logoutRoute = '/logout';\n  readonly tokenRefreshInterval = 300000;\n  readonly sessionTimeout = 3600000;\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "auth/auth.guard.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { CanActivate, Router } from '@angular/router';\nimport { AuthService } from './auth.service';\nimport { AuthConfig } from './auth.config';\n\n@Injectable({ providedIn: 'root' })\nexport class AuthGuard implements CanActivate {\n  constructor(\n    private authService: AuthService,\n    private router: Router,\n    private config: AuthConfig\n  ) {}\n\n  canActivate(): boolean {\n    if (this.authService.isAuthenticated()) {\n      return true;\n    }\n    this.router.navigate([this.config.loginRoute]);\n    return false;\n  }\n}\n",
+      "dependencies": [
+        "auth/auth.service.ts",
+        "auth/auth.config.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "auth/auth.interceptor.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { HttpInterceptor, HttpRequest, HttpHandler } from '@angular/common/http';\nimport { TokenService } from './token.service';\nimport { AuthConfig } from './auth.config';\n\n@Injectable()\nexport class AuthInterceptor implements HttpInterceptor {\n  constructor(\n    private tokenService: TokenService,\n    private config: AuthConfig\n  ) {}\n\n  intercept(req: HttpRequest<any>, next: HttpHandler) {\n    const token = this.tokenService.getToken();\n    if (token && this.shouldAddToken(req.url)) {\n      req = req.clone({\n        setHeaders: { Authorization: `Bearer ${token}` }\n      });\n    }\n    return next.handle(req);\n  }\n\n  private shouldAddToken(url: string): boolean {\n    return url.startsWith(this.config.apiBaseUrl);\n  }\n}\n",
+      "dependencies": [
+        "auth/token.service.ts",
+        "auth/auth.config.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "auth/auth.models.ts",
+      "content": "\nexport interface LoginCredentials {\n  username: string;\n  password: string;\n  rememberMe?: boolean;\n}\n\nexport interface AuthUser {\n  id: string;\n  username: string;\n  email: string;\n  roles: string[];\n  permissions: string[];\n}\n\nexport interface AuthToken {\n  accessToken: string;\n  refreshToken: string;\n  expiresIn: number;\n}\n\nexport interface AuthResponse {\n  user: AuthUser;\n  token: AuthToken;\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "auth/auth.module.ts",
+      "content": "\nimport { NgModule } from '@angular/core';\nimport { AuthService } from './auth.service';\nimport { AuthGuard } from './auth.guard';\nimport { AuthInterceptor } from './auth.interceptor';\nimport { TokenService } from './token.service';\nimport { AuthConfig } from './auth.config';\nimport { AuthState } from './auth.state';\nimport { LoginComponent } from './login.component';\nimport { LogoutComponent } from './logout.component';\n\n@NgModule({\n  declarations: [LoginComponent, LogoutComponent],\n  providers: [\n    AuthService,\n    AuthGuard,\n    AuthInterceptor,\n    TokenService,\n    AuthConfig,\n    AuthState\n  ],\n  exports: [LoginComponent, LogoutComponent]\n})\nexport class AuthModule {}\n",
+      "dependencies": [
+        "auth/auth.service.ts",
+        "auth/auth.guard.ts",
+        "auth/auth.interceptor.ts",
+        "auth/token.service.ts",
+        "auth/auth.config.ts",
+        "auth/auth.state.ts",
+        "auth/login.component.ts",
+        "auth/logout.component.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "auth/auth.service.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { AuthConfig } from './auth.config';\nimport { TokenService } from './token.service';\nimport { AuthState } from './auth.state';\nimport { LoginCredentials, AuthUser } from './auth.models';\n\n@Injectable({ providedIn: 'root' })\nexport class AuthService {\n  constructor(\n    private config: AuthConfig,\n    private tokenService: TokenService,\n    private authState: AuthState\n  ) {}\n\n  async login(credentials: LoginCredentials): Promise<AuthUser> {\n    const response = await this.authenticate(credentials);\n    this.tokenService.setToken(response.token);\n    this.authState.setUser(response.user);\n    return response.user;\n  }\n\n  logout(): void {\n    this.tokenService.clearToken();\n    this.authState.clearUser();\n  }\n\n  isAuthenticated(): boolean {\n    return this.tokenService.hasValidToken();\n  }\n}\n",
+      "dependencies": [
+        "auth/auth.config.ts",
+        "auth/token.service.ts",
+        "auth/auth.state.ts",
+        "auth/auth.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "auth/auth.state.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { BehaviorSubject, Observable } from 'rxjs';\nimport { AuthUser } from './auth.models';\n\n@Injectable({ providedIn: 'root' })\nexport class AuthState {\n  private userSubject = new BehaviorSubject<AuthUser | null>(null);\n\n  get user$(): Observable<AuthUser | null> {\n    return this.userSubject.asObservable();\n  }\n\n  get currentUser(): AuthUser | null {\n    return this.userSubject.value;\n  }\n\n  setUser(user: AuthUser): void {\n    this.userSubject.next(user);\n  }\n\n  clearUser(): void {\n    this.userSubject.next(null);\n  }\n}\n",
+      "dependencies": [
+        "auth/auth.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "auth/login.component.ts",
+      "content": "\nimport { Component } from '@angular/core';\nimport { Router } from '@angular/router';\nimport { AuthService } from './auth.service';\nimport { LoginCredentials } from './auth.models';\nimport { AuthConfig } from './auth.config';\n\n@Component({\n  selector: 'app-login',\n  template: `\n    <form (ngSubmit)=\"onSubmit()\">\n      <input [(ngModel)]=\"credentials.username\" placeholder=\"Username\">\n      <input [(ngModel)]=\"credentials.password\" type=\"password\">\n      <button type=\"submit\">Login</button>\n    </form>\n  `\n})\nexport class LoginComponent {\n  credentials: LoginCredentials = { username: '', password: '' };\n\n  constructor(\n    private authService: AuthService,\n    private router: Router,\n    private config: AuthConfig\n  ) {}\n\n  async onSubmit() {\n    await this.authService.login(this.credentials);\n    this.router.navigate(['/dashboard']);\n  }\n}\n",
+      "dependencies": [
+        "auth/auth.service.ts",
+        "auth/auth.models.ts",
+        "auth/auth.config.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "auth/logout.component.ts",
+      "content": "\nimport { Component, OnInit } from '@angular/core';\nimport { Router } from '@angular/router';\nimport { AuthService } from './auth.service';\nimport { AuthConfig } from './auth.config';\n\n@Component({\n  selector: 'app-logout',\n  template: '<p>Logging out...</p>'\n})\nexport class LogoutComponent implements OnInit {\n  constructor(\n    private authService: AuthService,\n    private router: Router,\n    private config: AuthConfig\n  ) {}\n\n  ngOnInit() {\n    this.authService.logout();\n    this.router.navigate([this.config.loginRoute]);\n  }\n}\n",
+      "dependencies": [
+        "auth/auth.service.ts",
+        "auth/auth.config.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "auth/token.service.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { AuthConfig } from './auth.config';\n\n@Injectable({ providedIn: 'root' })\nexport class TokenService {\n  private readonly STORAGE_KEY = 'auth_token';\n\n  constructor(private config: AuthConfig) {}\n\n  setToken(token: string): void {\n    localStorage.setItem(this.STORAGE_KEY, token);\n  }\n\n  getToken(): string | null {\n    return localStorage.getItem(this.STORAGE_KEY);\n  }\n\n  clearToken(): void {\n    localStorage.removeItem(this.STORAGE_KEY);\n  }\n\n  hasValidToken(): boolean {\n    const token = this.getToken();\n    if (!token) return false;\n    return !this.isTokenExpired(token);\n  }\n\n  private isTokenExpired(token: string): boolean {\n    const payload = JSON.parse(atob(token.split('.')[1]));\n    return payload.exp < Date.now() / 1000;\n  }\n}\n",
+      "dependencies": [
+        "auth/auth.config.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "user/user-avatar.component.ts",
+      "content": "\nimport { Component, Input } from '@angular/core';\nimport { User } from './user.models';\n\n@Component({\n  selector: 'app-user-avatar',\n  template: `\n    <div class=\"avatar\" [class.large]=\"size === 'large'\">\n      <img *ngIf=\"user?.avatar\" [src]=\"user.avatar\" [alt]=\"user.firstName\">\n      <span *ngIf=\"!user?.avatar\">{{initials}}</span>\n    </div>\n  `\n})\nexport class UserAvatarComponent {\n  @Input() user: User | null = null;\n  @Input() size: 'small' | 'medium' | 'large' = 'medium';\n\n  get initials(): string {\n    if (!this.user) return '?';\n    return this.user.firstName[0] + this.user.lastName[0];\n  }\n}\n",
+      "dependencies": [
+        "user/user.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "user/user-list.component.ts",
+      "content": "\nimport { Component, OnInit } from '@angular/core';\nimport { UserApi } from './user.api';\nimport { UserListItem } from './user.models';\n\n@Component({\n  selector: 'app-user-list',\n  template: `\n    <table>\n      <tr *ngFor=\"let user of users\">\n        <td>{{user.fullName}}</td>\n        <td>{{user.email}}</td>\n        <td>{{user.status}}</td>\n      </tr>\n    </table>\n  `\n})\nexport class UserListComponent implements OnInit {\n  users: UserListItem[] = [];\n\n  constructor(private userApi: UserApi) {}\n\n  async ngOnInit() {\n    this.users = await this.userApi.fetchUsers();\n  }\n}\n",
+      "dependencies": [
+        "user/user.api.ts",
+        "user/user.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "user/user-profile.component.ts",
+      "content": "\nimport { Component, OnInit } from '@angular/core';\nimport { UserService } from './user.service';\nimport { User, UserProfile } from './user.models';\nimport { UserState } from './user.state';\n\n@Component({\n  selector: 'app-user-profile',\n  template: `\n    <div class=\"profile\">\n      <img [src]=\"user?.avatar\" alt=\"Avatar\">\n      <h2>{{user?.firstName}} {{user?.lastName}}</h2>\n      <button (click)=\"editProfile()\">Edit Profile</button>\n    </div>\n  `\n})\nexport class UserProfileComponent implements OnInit {\n  user: User | null = null;\n\n  constructor(\n    private userService: UserService,\n    private userState: UserState\n  ) {}\n\n  ngOnInit() {\n    this.user = this.userState.getCurrentUser();\n  }\n\n  editProfile() {\n    // Open edit modal\n  }\n}\n",
+      "dependencies": [
+        "user/user.service.ts",
+        "user/user.models.ts",
+        "user/user.state.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "user/user-search.component.ts",
+      "content": "\nimport { Component, Output, EventEmitter } from '@angular/core';\nimport { UserApi } from './user.api';\nimport { UserListItem } from './user.models';\n\n@Component({\n  selector: 'app-user-search',\n  template: `\n    <input [(ngModel)]=\"query\" (input)=\"search()\" placeholder=\"Search users...\">\n    <ul *ngIf=\"results.length\">\n      <li *ngFor=\"let user of results\" (click)=\"select(user)\">{{user.fullName}}</li>\n    </ul>\n  `\n})\nexport class UserSearchComponent {\n  query = '';\n  results: UserListItem[] = [];\n  @Output() userSelected = new EventEmitter<UserListItem>();\n\n  constructor(private userApi: UserApi) {}\n\n  async search() {\n    if (this.query.length < 2) return;\n    this.results = await this.userApi.fetchUsers();\n  }\n\n  select(user: UserListItem) {\n    this.userSelected.emit(user);\n  }\n}\n",
+      "dependencies": [
+        "user/user.api.ts",
+        "user/user.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "user/user-settings.component.ts",
+      "content": "\nimport { Component, OnInit } from '@angular/core';\nimport { UserService } from './user.service';\nimport { UserPreferences } from './user.models';\nimport { UserState } from './user.state';\n\n@Component({\n  selector: 'app-user-settings',\n  template: `\n    <div class=\"settings\">\n      <h2>User Settings</h2>\n      <label>Theme: <select [(ngModel)]=\"prefs.theme\"></select></label>\n      <label>Language: <select [(ngModel)]=\"prefs.language\"></select></label>\n      <button (click)=\"save()\">Save Settings</button>\n    </div>\n  `\n})\nexport class UserSettingsComponent implements OnInit {\n  prefs: UserPreferences = { theme: 'light', language: 'en', notifications: true, newsletter: false };\n\n  constructor(\n    private userService: UserService,\n    private userState: UserState\n  ) {}\n\n  ngOnInit() {}\n\n  async save() {\n    await this.userService.updatePreferences(this.prefs);\n  }\n}\n",
+      "dependencies": [
+        "user/user.service.ts",
+        "user/user.models.ts",
+        "user/user.state.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "user/user.api.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { HttpClient } from '@angular/common/http';\nimport { User, UserProfile, UserPreferences, UserListItem } from './user.models';\n\n@Injectable({ providedIn: 'root' })\nexport class UserApi {\n  private readonly baseUrl = '/api/users';\n\n  constructor(private http: HttpClient) {}\n\n  async fetchUser(id: string): Promise<User> {\n    return this.http.get<User>(`${this.baseUrl}/${id}`).toPromise();\n  }\n\n  async fetchUsers(): Promise<UserListItem[]> {\n    return this.http.get<UserListItem[]>(this.baseUrl).toPromise();\n  }\n\n  async updateProfile(profile: UserProfile): Promise<User> {\n    return this.http.put<User>(`${this.baseUrl}/profile`, profile).toPromise();\n  }\n\n  async updatePreferences(prefs: UserPreferences): Promise<void> {\n    return this.http.put<void>(`${this.baseUrl}/preferences`, prefs).toPromise();\n  }\n}\n",
+      "dependencies": [
+        "user/user.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "user/user.models.ts",
+      "content": "\nexport interface User {\n  id: string;\n  email: string;\n  firstName: string;\n  lastName: string;\n  avatar?: string;\n  createdAt: Date;\n  updatedAt: Date;\n}\n\nexport interface UserProfile {\n  firstName: string;\n  lastName: string;\n  bio?: string;\n  avatar?: string;\n  phone?: string;\n}\n\nexport interface UserPreferences {\n  theme: 'light' | 'dark';\n  language: string;\n  notifications: boolean;\n  newsletter: boolean;\n}\n\nexport interface UserListItem {\n  id: string;\n  email: string;\n  fullName: string;\n  status: 'active' | 'inactive';\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "user/user.module.ts",
+      "content": "\nimport { NgModule } from '@angular/core';\nimport { CommonModule } from '@angular/common';\nimport { UserService } from './user.service';\nimport { UserApi } from './user.api';\nimport { UserState } from './user.state';\nimport { UserProfileComponent } from './user-profile.component';\nimport { UserSettingsComponent } from './user-settings.component';\nimport { UserListComponent } from './user-list.component';\nimport { UserAvatarComponent } from './user-avatar.component';\nimport { UserSearchComponent } from './user-search.component';\n\n@NgModule({\n  imports: [CommonModule],\n  declarations: [\n    UserProfileComponent,\n    UserSettingsComponent,\n    UserListComponent,\n    UserAvatarComponent,\n    UserSearchComponent\n  ],\n  providers: [UserService, UserApi, UserState],\n  exports: [\n    UserProfileComponent,\n    UserSettingsComponent,\n    UserListComponent,\n    UserAvatarComponent,\n    UserSearchComponent\n  ]\n})\nexport class UserModule {}\n",
+      "dependencies": [
+        "user/user.service.ts",
+        "user/user.api.ts",
+        "user/user.state.ts",
+        "user/user-profile.component.ts",
+        "user/user-settings.component.ts",
+        "user/user-list.component.ts",
+        "user/user-avatar.component.ts",
+        "user/user-search.component.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "user/user.service.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { HttpClient } from '@angular/common/http';\nimport { User, UserProfile, UserPreferences } from './user.models';\nimport { UserState } from './user.state';\nimport { UserApi } from './user.api';\n\n@Injectable({ providedIn: 'root' })\nexport class UserService {\n  constructor(\n    private http: HttpClient,\n    private userState: UserState,\n    private userApi: UserApi\n  ) {}\n\n  async getUser(id: string): Promise<User> {\n    const user = await this.userApi.fetchUser(id);\n    this.userState.setCurrentUser(user);\n    return user;\n  }\n\n  async updateProfile(profile: UserProfile): Promise<User> {\n    return this.userApi.updateProfile(profile);\n  }\n\n  async updatePreferences(prefs: UserPreferences): Promise<void> {\n    return this.userApi.updatePreferences(prefs);\n  }\n}\n",
+      "dependencies": [
+        "user/user.models.ts",
+        "user/user.state.ts",
+        "user/user.api.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "user/user.state.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { BehaviorSubject } from 'rxjs';\nimport { User, UserPreferences } from './user.models';\n\n@Injectable({ providedIn: 'root' })\nexport class UserState {\n  private currentUser$ = new BehaviorSubject<User | null>(null);\n  private preferences$ = new BehaviorSubject<UserPreferences | null>(null);\n\n  setCurrentUser(user: User): void {\n    this.currentUser$.next(user);\n  }\n\n  getCurrentUser(): User | null {\n    return this.currentUser$.value;\n  }\n\n  setPreferences(prefs: UserPreferences): void {\n    this.preferences$.next(prefs);\n  }\n}\n",
+      "dependencies": [
+        "user/user.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "product/product-card.component.ts",
+      "content": "\nimport { Component, Input } from '@angular/core';\nimport { Product } from './product.models';\n\n@Component({\n  selector: 'app-product-card',\n  template: `\n    <div class=\"product-card\">\n      <img [src]=\"product.images[0]\" [alt]=\"product.name\">\n      <h3>{{product.name}}</h3>\n      <p class=\"price\">${{product.salePrice || product.price}}</p>\n      <span *ngIf=\"product.salePrice\" class=\"sale-badge\">Sale</span>\n    </div>\n  `\n})\nexport class ProductCardComponent {\n  @Input() product!: Product;\n}\n",
+      "dependencies": [
+        "product/product.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "product/product-detail.component.ts",
+      "content": "\nimport { Component, OnInit } from '@angular/core';\nimport { ActivatedRoute } from '@angular/router';\nimport { ProductService } from './product.service';\nimport { Product } from './product.models';\n\n@Component({\n  selector: 'app-product-detail',\n  template: `\n    <div class=\"product-detail\" *ngIf=\"product\">\n      <img [src]=\"product.images[0]\" [alt]=\"product.name\">\n      <h1>{{product.name}}</h1>\n      <p class=\"price\">${{product.price}}</p>\n      <p>{{product.description}}</p>\n      <button (click)=\"addToCart()\">Add to Cart</button>\n    </div>\n  `\n})\nexport class ProductDetailComponent implements OnInit {\n  product: Product | null = null;\n\n  constructor(private route: ActivatedRoute, private productService: ProductService) {}\n\n  async ngOnInit() {\n    const id = this.route.snapshot.params['id'];\n    this.product = await this.productService.getProduct(id);\n  }\n\n  addToCart() {}\n}\n",
+      "dependencies": [
+        "product/product.service.ts",
+        "product/product.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "product/product-filter.component.ts",
+      "content": "\nimport { Component, Output, EventEmitter } from '@angular/core';\nimport { ProductFilter, ProductCategory } from './product.models';\nimport { ProductService } from './product.service';\n\n@Component({\n  selector: 'app-product-filter',\n  template: `\n    <div class=\"filters\">\n      <select [(ngModel)]=\"filter.categoryId\">\n        <option *ngFor=\"let cat of categories\" [value]=\"cat.id\">{{cat.name}}</option>\n      </select>\n      <input type=\"number\" [(ngModel)]=\"filter.minPrice\" placeholder=\"Min price\">\n      <input type=\"number\" [(ngModel)]=\"filter.maxPrice\" placeholder=\"Max price\">\n      <button (click)=\"apply()\">Apply</button>\n    </div>\n  `\n})\nexport class ProductFilterComponent {\n  filter: ProductFilter = {};\n  categories: ProductCategory[] = [];\n  @Output() filterChange = new EventEmitter<ProductFilter>();\n\n  constructor(private productService: ProductService) {}\n\n  async ngOnInit() {\n    this.categories = await this.productService.getCategories();\n  }\n\n  apply() {\n    this.filterChange.emit(this.filter);\n  }\n}\n",
+      "dependencies": [
+        "product/product.models.ts",
+        "product/product.service.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "product/product-list.component.ts",
+      "content": "\nimport { Component, OnInit } from '@angular/core';\nimport { ProductService } from './product.service';\nimport { Product, ProductFilter } from './product.models';\nimport { ProductState } from './product.state';\n\n@Component({\n  selector: 'app-product-list',\n  template: `\n    <div class=\"product-grid\">\n      <app-product-card *ngFor=\"let product of products\" [product]=\"product\"></app-product-card>\n    </div>\n  `\n})\nexport class ProductListComponent implements OnInit {\n  products: Product[] = [];\n\n  constructor(private productService: ProductService, private state: ProductState) {}\n\n  async ngOnInit() {\n    this.products = await this.productService.loadProducts();\n  }\n}\n",
+      "dependencies": [
+        "product/product.service.ts",
+        "product/product.models.ts",
+        "product/product.state.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "product/product-search.component.ts",
+      "content": "\nimport { Component, Output, EventEmitter } from '@angular/core';\nimport { ProductApi } from './product.api';\nimport { Product } from './product.models';\n\n@Component({\n  selector: 'app-product-search',\n  template: `\n    <input [(ngModel)]=\"query\" (input)=\"search()\" placeholder=\"Search products...\">\n    <div class=\"results\" *ngIf=\"results.length\">\n      <app-product-card *ngFor=\"let p of results\" [product]=\"p\"></app-product-card>\n    </div>\n  `\n})\nexport class ProductSearchComponent {\n  query = '';\n  results: Product[] = [];\n  @Output() productSelected = new EventEmitter<Product>();\n\n  constructor(private api: ProductApi) {}\n\n  async search() {\n    if (this.query.length < 2) return;\n    this.results = await this.api.getProducts({ search: this.query });\n  }\n}\n",
+      "dependencies": [
+        "product/product.api.ts",
+        "product/product.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "product/product.api.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { HttpClient } from '@angular/common/http';\nimport { Product, ProductFilter, ProductCategory } from './product.models';\n\n@Injectable({ providedIn: 'root' })\nexport class ProductApi {\n  private baseUrl = '/api/products';\n\n  constructor(private http: HttpClient) {}\n\n  getProducts(filter?: ProductFilter): Promise<Product[]> {\n    return this.http.get<Product[]>(this.baseUrl, { params: filter as any }).toPromise();\n  }\n\n  getProduct(id: string): Promise<Product> {\n    return this.http.get<Product>(`${this.baseUrl}/${id}`).toPromise();\n  }\n\n  getCategories(): Promise<ProductCategory[]> {\n    return this.http.get<ProductCategory[]>('/api/categories').toPromise();\n  }\n}\n",
+      "dependencies": [
+        "product/product.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "product/product.models.ts",
+      "content": "\nexport interface Product {\n  id: string;\n  name: string;\n  description: string;\n  price: number;\n  salePrice?: number;\n  images: string[];\n  categoryId: string;\n  stock: number;\n  sku: string;\n}\n\nexport interface ProductFilter {\n  categoryId?: string;\n  minPrice?: number;\n  maxPrice?: number;\n  inStock?: boolean;\n  search?: string;\n}\n\nexport interface ProductCategory {\n  id: string;\n  name: string;\n  slug: string;\n  parentId?: string;\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "product/product.module.ts",
+      "content": "\nimport { NgModule } from '@angular/core';\nimport { CommonModule } from '@angular/common';\nimport { ProductService } from './product.service';\nimport { ProductApi } from './product.api';\nimport { ProductState } from './product.state';\nimport { ProductListComponent } from './product-list.component';\nimport { ProductDetailComponent } from './product-detail.component';\nimport { ProductCardComponent } from './product-card.component';\nimport { ProductFilterComponent } from './product-filter.component';\nimport { ProductSearchComponent } from './product-search.component';\n\n@NgModule({\n  imports: [CommonModule],\n  declarations: [ProductListComponent, ProductDetailComponent, ProductCardComponent, ProductFilterComponent, ProductSearchComponent],\n  providers: [ProductService, ProductApi, ProductState],\n  exports: [ProductListComponent, ProductDetailComponent, ProductCardComponent, ProductFilterComponent, ProductSearchComponent]\n})\nexport class ProductModule {}\n",
+      "dependencies": [
+        "product/product.service.ts",
+        "product/product.api.ts",
+        "product/product.state.ts",
+        "product/product-list.component.ts",
+        "product/product-detail.component.ts",
+        "product/product-card.component.ts",
+        "product/product-filter.component.ts",
+        "product/product-search.component.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "product/product.service.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { Product, ProductFilter, ProductCategory } from './product.models';\nimport { ProductApi } from './product.api';\nimport { ProductState } from './product.state';\n\n@Injectable({ providedIn: 'root' })\nexport class ProductService {\n  constructor(private api: ProductApi, private state: ProductState) {}\n\n  async loadProducts(filter?: ProductFilter): Promise<Product[]> {\n    const products = await this.api.getProducts(filter);\n    this.state.setProducts(products);\n    return products;\n  }\n\n  async getProduct(id: string): Promise<Product> {\n    return this.api.getProduct(id);\n  }\n\n  async getCategories(): Promise<ProductCategory[]> {\n    return this.api.getCategories();\n  }\n}\n",
+      "dependencies": [
+        "product/product.models.ts",
+        "product/product.api.ts",
+        "product/product.state.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "product/product.state.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { BehaviorSubject } from 'rxjs';\nimport { Product, ProductCategory } from './product.models';\n\n@Injectable({ providedIn: 'root' })\nexport class ProductState {\n  private products$ = new BehaviorSubject<Product[]>([]);\n  private categories$ = new BehaviorSubject<ProductCategory[]>([]);\n\n  setProducts(products: Product[]): void {\n    this.products$.next(products);\n  }\n\n  getProducts(): Product[] {\n    return this.products$.value;\n  }\n\n  setCategories(categories: ProductCategory[]): void {\n    this.categories$.next(categories);\n  }\n}\n",
+      "dependencies": [
+        "product/product.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "cart/cart-icon.component.ts",
+      "content": "\nimport { Component } from '@angular/core';\nimport { CartState } from './cart.state';\nimport { CartSummary } from './cart.models';\n\n@Component({\n  selector: 'app-cart-icon',\n  template: `\n    <div class=\"cart-icon\" (click)=\"toggle()\">\n      <span class=\"icon\">🛒</span>\n      <span class=\"badge\" *ngIf=\"itemCount > 0\">{{itemCount}}</span>\n    </div>\n  `\n})\nexport class CartIconComponent {\n  itemCount = 0;\n\n  constructor(private state: CartState) {\n    const summary = this.state.getSummary();\n    this.itemCount = summary.itemCount;\n  }\n\n  toggle() {}\n}\n",
+      "dependencies": [
+        "cart/cart.state.ts",
+        "cart/cart.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "cart/cart-item.component.ts",
+      "content": "\nimport { Component, Input, Output, EventEmitter } from '@angular/core';\nimport { CartItem } from './cart.models';\nimport { CartService } from './cart.service';\n\n@Component({\n  selector: 'app-cart-item',\n  template: `\n    <div class=\"cart-item\">\n      <img [src]=\"item.image\" [alt]=\"item.productName\">\n      <span>{{item.productName}}</span>\n      <input type=\"number\" [value]=\"item.quantity\" (change)=\"updateQty($event)\">\n      <span>${{item.price * item.quantity}}</span>\n      <button (click)=\"remove.emit()\">Remove</button>\n    </div>\n  `\n})\nexport class CartItemComponent {\n  @Input() item!: CartItem;\n  @Output() remove = new EventEmitter<void>();\n\n  constructor(private cartService: CartService) {}\n\n  updateQty(event: Event) {\n    const qty = +(event.target as HTMLInputElement).value;\n    this.cartService.updateQuantity(this.item.productId, qty);\n  }\n}\n",
+      "dependencies": [
+        "cart/cart.models.ts",
+        "cart/cart.service.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "cart/cart-promo.component.ts",
+      "content": "\nimport { Component } from '@angular/core';\nimport { CartApi } from './cart.api';\nimport { CartPromo } from './cart.models';\n\n@Component({\n  selector: 'app-cart-promo',\n  template: `\n    <div class=\"promo\">\n      <input [(ngModel)]=\"code\" placeholder=\"Promo code\">\n      <button (click)=\"apply()\">Apply</button>\n      <span *ngIf=\"promo\">-{{promo.discount}}{{promo.type === 'percent' ? '%' : '$'}}</span>\n    </div>\n  `\n})\nexport class CartPromoComponent {\n  code = '';\n  promo: CartPromo | null = null;\n\n  constructor(private api: CartApi) {}\n\n  async apply() {\n    this.promo = await this.api.applyPromo(this.code);\n  }\n}\n",
+      "dependencies": [
+        "cart/cart.api.ts",
+        "cart/cart.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "cart/cart-summary.component.ts",
+      "content": "\nimport { Component, Input } from '@angular/core';\nimport { CartSummary } from './cart.models';\n\n@Component({\n  selector: 'app-cart-summary',\n  template: `\n    <div class=\"cart-summary\">\n      <div>Items: {{summary.itemCount}}</div>\n      <div>Subtotal: ${{summary.subtotal.toFixed(2)}}</div>\n      <div>Tax: ${{summary.tax.toFixed(2)}}</div>\n      <div>Shipping: ${{summary.shipping.toFixed(2)}}</div>\n      <div class=\"total\">Total: ${{summary.total.toFixed(2)}}</div>\n    </div>\n  `\n})\nexport class CartSummaryComponent {\n  @Input() summary!: CartSummary;\n}\n",
+      "dependencies": [
+        "cart/cart.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "cart/cart.api.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { HttpClient } from '@angular/common/http';\nimport { Cart, CartPromo } from './cart.models';\n\n@Injectable({ providedIn: 'root' })\nexport class CartApi {\n  constructor(private http: HttpClient) {}\n\n  async checkout(cart: Cart): Promise<string> {\n    const res = await this.http.post<{ orderId: string }>('/api/checkout', cart).toPromise();\n    return res.orderId;\n  }\n\n  async applyPromo(code: string): Promise<CartPromo> {\n    return this.http.post<CartPromo>('/api/cart/promo', { code }).toPromise();\n  }\n\n  async saveCart(cart: Cart): Promise<void> {\n    await this.http.post('/api/cart', cart).toPromise();\n  }\n}\n",
+      "dependencies": [
+        "cart/cart.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "cart/cart.component.ts",
+      "content": "\nimport { Component, OnInit } from '@angular/core';\nimport { CartService } from './cart.service';\nimport { Cart, CartSummary } from './cart.models';\nimport { CartState } from './cart.state';\n\n@Component({\n  selector: 'app-cart',\n  template: `\n    <div class=\"cart\">\n      <h2>Shopping Cart</h2>\n      <app-cart-item *ngFor=\"let item of cart.items\" [item]=\"item\" (remove)=\"remove(item.productId)\"></app-cart-item>\n      <app-cart-summary [summary]=\"summary\"></app-cart-summary>\n      <button (click)=\"checkout()\">Checkout</button>\n    </div>\n  `\n})\nexport class CartComponent implements OnInit {\n  cart!: Cart;\n  summary!: CartSummary;\n\n  constructor(private cartService: CartService, private state: CartState) {}\n\n  ngOnInit() {\n    this.cart = this.cartService.getCart();\n    this.summary = this.cartService.getSummary();\n  }\n\n  remove(productId: string) {\n    this.cartService.removeItem(productId);\n  }\n\n  checkout() {\n    this.cartService.checkout();\n  }\n}\n",
+      "dependencies": [
+        "cart/cart.service.ts",
+        "cart/cart.models.ts",
+        "cart/cart.state.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "cart/cart.models.ts",
+      "content": "\nexport interface CartItem {\n  productId: string;\n  productName?: string;\n  quantity: number;\n  price: number;\n  image?: string;\n}\n\nexport interface Cart {\n  items: CartItem[];\n  createdAt: Date;\n  updatedAt: Date;\n}\n\nexport interface CartSummary {\n  itemCount: number;\n  subtotal: number;\n  tax: number;\n  shipping: number;\n  total: number;\n}\n\nexport interface CartPromo {\n  code: string;\n  discount: number;\n  type: 'percent' | 'fixed';\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "cart/cart.module.ts",
+      "content": "\nimport { NgModule } from '@angular/core';\nimport { CommonModule } from '@angular/common';\nimport { CartService } from './cart.service';\nimport { CartState } from './cart.state';\nimport { CartApi } from './cart.api';\nimport { CartComponent } from './cart.component';\nimport { CartItemComponent } from './cart-item.component';\nimport { CartSummaryComponent } from './cart-summary.component';\nimport { CartIconComponent } from './cart-icon.component';\nimport { CartPromoComponent } from './cart-promo.component';\n\n@NgModule({\n  imports: [CommonModule],\n  declarations: [CartComponent, CartItemComponent, CartSummaryComponent, CartIconComponent, CartPromoComponent],\n  providers: [CartService, CartState, CartApi],\n  exports: [CartComponent, CartItemComponent, CartSummaryComponent, CartIconComponent, CartPromoComponent]\n})\nexport class CartModule {}\n",
+      "dependencies": [
+        "cart/cart.service.ts",
+        "cart/cart.state.ts",
+        "cart/cart.api.ts",
+        "cart/cart.component.ts",
+        "cart/cart-item.component.ts",
+        "cart/cart-summary.component.ts",
+        "cart/cart-icon.component.ts",
+        "cart/cart-promo.component.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "cart/cart.service.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { CartItem, Cart, CartSummary } from './cart.models';\nimport { CartState } from './cart.state';\nimport { CartApi } from './cart.api';\n\n@Injectable({ providedIn: 'root' })\nexport class CartService {\n  constructor(private state: CartState, private api: CartApi) {}\n\n  addItem(productId: string, quantity: number): void {\n    this.state.addItem({ productId, quantity, price: 0 });\n  }\n\n  removeItem(productId: string): void {\n    this.state.removeItem(productId);\n  }\n\n  updateQuantity(productId: string, quantity: number): void {\n    this.state.updateQuantity(productId, quantity);\n  }\n\n  getCart(): Cart {\n    return this.state.getCart();\n  }\n\n  getSummary(): CartSummary {\n    return this.state.getSummary();\n  }\n\n  async checkout(): Promise<string> {\n    const cart = this.getCart();\n    const orderId = await this.api.checkout(cart);\n    this.state.clearCart();\n    return orderId;\n  }\n}\n",
+      "dependencies": [
+        "cart/cart.models.ts",
+        "cart/cart.state.ts",
+        "cart/cart.api.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "cart/cart.state.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { BehaviorSubject } from 'rxjs';\nimport { Cart, CartItem, CartSummary } from './cart.models';\n\n@Injectable({ providedIn: 'root' })\nexport class CartState {\n  private cart$ = new BehaviorSubject<Cart>({ items: [], createdAt: new Date(), updatedAt: new Date() });\n\n  addItem(item: CartItem): void {\n    const cart = this.cart$.value;\n    const existing = cart.items.find(i => i.productId === item.productId);\n    if (existing) {\n      existing.quantity += item.quantity;\n    } else {\n      cart.items.push(item);\n    }\n    this.cart$.next({ ...cart, updatedAt: new Date() });\n  }\n\n  removeItem(productId: string): void {\n    const cart = this.cart$.value;\n    cart.items = cart.items.filter(i => i.productId !== productId);\n    this.cart$.next({ ...cart, updatedAt: new Date() });\n  }\n\n  updateQuantity(productId: string, quantity: number): void {\n    const cart = this.cart$.value;\n    const item = cart.items.find(i => i.productId === productId);\n    if (item) item.quantity = quantity;\n    this.cart$.next({ ...cart, updatedAt: new Date() });\n  }\n\n  getCart(): Cart {\n    return this.cart$.value;\n  }\n\n  getSummary(): CartSummary {\n    const cart = this.cart$.value;\n    const subtotal = cart.items.reduce((sum, i) => sum + i.price * i.quantity, 0);\n    return { itemCount: cart.items.length, subtotal, tax: subtotal * 0.08, shipping: 5.99, total: subtotal * 1.08 + 5.99 };\n  }\n\n  clearCart(): void {\n    this.cart$.next({ items: [], createdAt: new Date(), updatedAt: new Date() });\n  }\n}\n",
+      "dependencies": [
+        "cart/cart.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "order/order-detail.component.ts",
+      "content": "\nimport { Component, OnInit } from '@angular/core';\nimport { ActivatedRoute } from '@angular/router';\nimport { OrderService } from './order.service';\nimport { Order } from './order.models';\n\n@Component({\n  selector: 'app-order-detail',\n  template: `\n    <div class=\"order-detail\" *ngIf=\"order\">\n      <h2>Order #{{order.id}}</h2>\n      <app-order-status [status]=\"order.status\"></app-order-status>\n      <div *ngFor=\"let item of order.items\">\n        {{item.productName}} x{{item.quantity}} - ${{item.price}}\n      </div>\n      <div class=\"total\">Total: ${{order.total}}</div>\n      <button *ngIf=\"order.status === 'pending'\" (click)=\"cancel()\">Cancel Order</button>\n    </div>\n  `\n})\nexport class OrderDetailComponent implements OnInit {\n  order: Order | null = null;\n\n  constructor(private route: ActivatedRoute, private orderService: OrderService) {}\n\n  async ngOnInit() {\n    const id = this.route.snapshot.params['id'];\n    this.order = await this.orderService.getOrder(id);\n  }\n\n  async cancel() {\n    if (this.order) await this.orderService.cancelOrder(this.order.id);\n  }\n}\n",
+      "dependencies": [
+        "order/order.service.ts",
+        "order/order.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "order/order-invoice.component.ts",
+      "content": "\nimport { Component, Input } from '@angular/core';\nimport { Order } from './order.models';\n\n@Component({\n  selector: 'app-order-invoice',\n  template: `\n    <div class=\"invoice\" *ngIf=\"order\">\n      <h3>Invoice #{{order.id}}</h3>\n      <table>\n        <tr *ngFor=\"let item of order.items\">\n          <td>{{item.productName}}</td>\n          <td>{{item.quantity}}</td>\n          <td>${{item.price}}</td>\n        </tr>\n      </table>\n      <div>Subtotal: ${{order.subtotal}}</div>\n      <div>Tax: ${{order.tax}}</div>\n      <div>Shipping: ${{order.shipping}}</div>\n      <div class=\"total\">Total: ${{order.total}}</div>\n    </div>\n  `\n})\nexport class OrderInvoiceComponent {\n  @Input() order!: Order;\n}\n",
+      "dependencies": [
+        "order/order.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "order/order-list.component.ts",
+      "content": "\nimport { Component, OnInit } from '@angular/core';\nimport { OrderService } from './order.service';\nimport { Order } from './order.models';\n\n@Component({\n  selector: 'app-order-list',\n  template: `\n    <div class=\"orders\">\n      <h2>My Orders</h2>\n      <div *ngFor=\"let order of orders\" class=\"order-row\" [routerLink]=\"['/orders', order.id]\">\n        <span>#{{order.id}}</span>\n        <span>{{order.createdAt | date}}</span>\n        <app-order-status [status]=\"order.status\"></app-order-status>\n        <span>${{order.total}}</span>\n      </div>\n    </div>\n  `\n})\nexport class OrderListComponent implements OnInit {\n  orders: Order[] = [];\n\n  constructor(private orderService: OrderService) {}\n\n  async ngOnInit() {\n    this.orders = await this.orderService.getOrders();\n  }\n}\n",
+      "dependencies": [
+        "order/order.service.ts",
+        "order/order.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "order/order-status.component.ts",
+      "content": "\nimport { Component, Input } from '@angular/core';\nimport { OrderStatus } from './order.models';\n\n@Component({\n  selector: 'app-order-status',\n  template: `<span class=\"status\" [class]=\"status\">{{status | titlecase}}</span>`\n})\nexport class OrderStatusComponent {\n  @Input() status!: OrderStatus;\n}\n",
+      "dependencies": [
+        "order/order.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "order/order-tracking.component.ts",
+      "content": "\nimport { Component, Input } from '@angular/core';\nimport { Order, OrderStatus } from './order.models';\n\n@Component({\n  selector: 'app-order-tracking',\n  template: `\n    <div class=\"tracking\">\n      <div *ngFor=\"let step of steps\" [class.active]=\"isActive(step)\" [class.complete]=\"isComplete(step)\">\n        {{step | titlecase}}\n      </div>\n    </div>\n  `\n})\nexport class OrderTrackingComponent {\n  @Input() order!: Order;\n  steps: OrderStatus[] = ['pending', 'confirmed', 'processing', 'shipped', 'delivered'];\n\n  isActive(step: OrderStatus): boolean {\n    return this.order?.status === step;\n  }\n\n  isComplete(step: OrderStatus): boolean {\n    return this.steps.indexOf(step) < this.steps.indexOf(this.order?.status);\n  }\n}\n",
+      "dependencies": [
+        "order/order.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "order/order.api.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { HttpClient } from '@angular/common/http';\nimport { Order, OrderStatus, OrderFilter } from './order.models';\n\n@Injectable({ providedIn: 'root' })\nexport class OrderApi {\n  private baseUrl = '/api/orders';\n\n  constructor(private http: HttpClient) {}\n\n  getOrders(filter?: OrderFilter): Promise<Order[]> {\n    return this.http.get<Order[]>(this.baseUrl, { params: filter as any }).toPromise();\n  }\n\n  getOrder(id: string): Promise<Order> {\n    return this.http.get<Order>(`${this.baseUrl}/${id}`).toPromise();\n  }\n\n  updateStatus(id: string, status: OrderStatus): Promise<Order> {\n    return this.http.patch<Order>(`${this.baseUrl}/${id}/status`, { status }).toPromise();\n  }\n\n  cancelOrder(id: string): Promise<void> {\n    return this.http.delete<void>(`${this.baseUrl}/${id}`).toPromise();\n  }\n}\n",
+      "dependencies": [
+        "order/order.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "order/order.models.ts",
+      "content": "\nexport type OrderStatus = 'pending' | 'confirmed' | 'processing' | 'shipped' | 'delivered' | 'cancelled';\n\nexport interface OrderItem {\n  productId: string;\n  productName: string;\n  quantity: number;\n  price: number;\n}\n\nexport interface Order {\n  id: string;\n  userId: string;\n  items: OrderItem[];\n  status: OrderStatus;\n  subtotal: number;\n  tax: number;\n  shipping: number;\n  total: number;\n  shippingAddress: Address;\n  createdAt: Date;\n  updatedAt: Date;\n}\n\nexport interface Address {\n  street: string;\n  city: string;\n  state: string;\n  zip: string;\n  country: string;\n}\n\nexport interface OrderFilter {\n  status?: OrderStatus;\n  startDate?: Date;\n  endDate?: Date;\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "order/order.module.ts",
+      "content": "\nimport { NgModule } from '@angular/core';\nimport { CommonModule } from '@angular/common';\nimport { OrderService } from './order.service';\nimport { OrderApi } from './order.api';\nimport { OrderState } from './order.state';\nimport { OrderListComponent } from './order-list.component';\nimport { OrderDetailComponent } from './order-detail.component';\nimport { OrderStatusComponent } from './order-status.component';\nimport { OrderTrackingComponent } from './order-tracking.component';\nimport { OrderInvoiceComponent } from './order-invoice.component';\n\n@NgModule({\n  imports: [CommonModule],\n  declarations: [OrderListComponent, OrderDetailComponent, OrderStatusComponent, OrderTrackingComponent, OrderInvoiceComponent],\n  providers: [OrderService, OrderApi, OrderState],\n  exports: [OrderListComponent, OrderDetailComponent, OrderStatusComponent, OrderTrackingComponent, OrderInvoiceComponent]\n})\nexport class OrderModule {}\n",
+      "dependencies": [
+        "order/order.service.ts",
+        "order/order.api.ts",
+        "order/order.state.ts",
+        "order/order-list.component.ts",
+        "order/order-detail.component.ts",
+        "order/order-status.component.ts",
+        "order/order-tracking.component.ts",
+        "order/order-invoice.component.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "order/order.service.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { Order, OrderStatus, OrderFilter } from './order.models';\nimport { OrderApi } from './order.api';\nimport { OrderState } from './order.state';\n\n@Injectable({ providedIn: 'root' })\nexport class OrderService {\n  constructor(private api: OrderApi, private state: OrderState) {}\n\n  async getOrders(filter?: OrderFilter): Promise<Order[]> {\n    const orders = await this.api.getOrders(filter);\n    this.state.setOrders(orders);\n    return orders;\n  }\n\n  async getOrder(id: string): Promise<Order> {\n    return this.api.getOrder(id);\n  }\n\n  async updateStatus(id: string, status: OrderStatus): Promise<Order> {\n    return this.api.updateStatus(id, status);\n  }\n\n  async cancelOrder(id: string): Promise<void> {\n    await this.api.cancelOrder(id);\n  }\n}\n",
+      "dependencies": [
+        "order/order.models.ts",
+        "order/order.api.ts",
+        "order/order.state.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "order/order.state.ts",
+      "content": "\nimport { Injectable } from '@angular/core';\nimport { BehaviorSubject } from 'rxjs';\nimport { Order } from './order.models';\n\n@Injectable({ providedIn: 'root' })\nexport class OrderState {\n  private orders$ = new BehaviorSubject<Order[]>([]);\n  private currentOrder$ = new BehaviorSubject<Order | null>(null);\n\n  setOrders(orders: Order[]): void {\n    this.orders$.next(orders);\n  }\n\n  getOrders(): Order[] {\n    return this.orders$.value;\n  }\n\n  setCurrentOrder(order: Order): void {\n    this.currentOrder$.next(order);\n  }\n}\n",
+      "dependencies": [
+        "order/order.models.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "ui/alert.component.ts",
+      "content": "\nimport { Component, Input, Output, EventEmitter } from '@angular/core';\n\n@Component({\n  selector: 'app-alert',\n  template: `\n    <div class=\"alert\" [class]=\"type\" *ngIf=\"visible\">\n      <span>{{message}}</span>\n      <button *ngIf=\"dismissible\" (click)=\"dismiss()\">&times;</button>\n    </div>\n  `\n})\nexport class AlertComponent {\n  @Input() type: 'success' | 'error' | 'warning' | 'info' = 'info';\n  @Input() message = '';\n  @Input() dismissible = true;\n  @Output() dismissed = new EventEmitter<void>();\n  visible = true;\n  dismiss() { this.visible = false; this.dismissed.emit(); }\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "ui/button.component.ts",
+      "content": "\nimport { Component, Input, Output, EventEmitter } from '@angular/core';\n\n@Component({\n  selector: 'app-button',\n  template: `\n    <button [type]=\"type\" [class]=\"variant\" [disabled]=\"disabled\" (click)=\"onClick.emit($event)\">\n      <ng-content></ng-content>\n    </button>\n  `\n})\nexport class ButtonComponent {\n  @Input() type: 'button' | 'submit' = 'button';\n  @Input() variant: 'primary' | 'secondary' | 'danger' = 'primary';\n  @Input() disabled = false;\n  @Output() onClick = new EventEmitter<MouseEvent>();\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "ui/dropdown.component.ts",
+      "content": "\nimport { Component, Input, Output, EventEmitter } from '@angular/core';\n\nexport interface DropdownOption { value: string; label: string; }\n\n@Component({\n  selector: 'app-dropdown',\n  template: `\n    <div class=\"dropdown\" [class.open]=\"isOpen\">\n      <button (click)=\"toggle()\">{{selectedLabel || placeholder}}</button>\n      <ul *ngIf=\"isOpen\">\n        <li *ngFor=\"let opt of options\" (click)=\"select(opt)\">{{opt.label}}</li>\n      </ul>\n    </div>\n  `\n})\nexport class DropdownComponent {\n  @Input() options: DropdownOption[] = [];\n  @Input() placeholder = 'Select...';\n  @Input() value = '';\n  @Output() valueChange = new EventEmitter<string>();\n  isOpen = false;\n  get selectedLabel() { return this.options.find(o => o.value === this.value)?.label; }\n  toggle() { this.isOpen = !this.isOpen; }\n  select(opt: DropdownOption) { this.value = opt.value; this.valueChange.emit(opt.value); this.isOpen = false; }\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "ui/input.component.ts",
+      "content": "\nimport { Component, Input, forwardRef } from '@angular/core';\nimport { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';\n\n@Component({\n  selector: 'app-input',\n  template: `\n    <div class=\"input-wrapper\">\n      <label *ngIf=\"label\">{{label}}</label>\n      <input [type]=\"type\" [placeholder]=\"placeholder\" [(ngModel)]=\"value\" (blur)=\"onBlur()\">\n      <span class=\"error\" *ngIf=\"error\">{{error}}</span>\n    </div>\n  `,\n  providers: [{ provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => InputComponent), multi: true }]\n})\nexport class InputComponent implements ControlValueAccessor {\n  @Input() type = 'text';\n  @Input() label = '';\n  @Input() placeholder = '';\n  @Input() error = '';\n  value = '';\n  onChange = (v: string) => {};\n  onTouched = () => {};\n  writeValue(v: string) { this.value = v; }\n  registerOnChange(fn: any) { this.onChange = fn; }\n  registerOnTouched(fn: any) { this.onTouched = fn; }\n  onBlur() { this.onTouched(); }\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "ui/loading.component.ts",
+      "content": "\nimport { Component, Input } from '@angular/core';\n\n@Component({\n  selector: 'app-loading',\n  template: `\n    <div class=\"loading\" *ngIf=\"isLoading\">\n      <div class=\"spinner\" [class]=\"size\"></div>\n      <span *ngIf=\"message\">{{message}}</span>\n    </div>\n  `\n})\nexport class LoadingComponent {\n  @Input() isLoading = false;\n  @Input() size: 'small' | 'medium' | 'large' = 'medium';\n  @Input() message = '';\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "ui/modal.component.ts",
+      "content": "\nimport { Component, Input, Output, EventEmitter } from '@angular/core';\n\n@Component({\n  selector: 'app-modal',\n  template: `\n    <div class=\"modal-backdrop\" *ngIf=\"isOpen\" (click)=\"close()\">\n      <div class=\"modal-content\" (click)=\"$event.stopPropagation()\">\n        <div class=\"modal-header\">\n          <h3>{{title}}</h3>\n          <button class=\"close\" (click)=\"close()\">&times;</button>\n        </div>\n        <div class=\"modal-body\"><ng-content></ng-content></div>\n        <div class=\"modal-footer\"><ng-content select=\"[footer]\"></ng-content></div>\n      </div>\n    </div>\n  `\n})\nexport class ModalComponent {\n  @Input() isOpen = false;\n  @Input() title = '';\n  @Output() closed = new EventEmitter<void>();\n  close() { this.closed.emit(); }\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "ui/pagination.component.ts",
+      "content": "\nimport { Component, Input, Output, EventEmitter } from '@angular/core';\n\n@Component({\n  selector: 'app-pagination',\n  template: `\n    <div class=\"pagination\">\n      <button [disabled]=\"page === 1\" (click)=\"changePage(page - 1)\">Prev</button>\n      <span *ngFor=\"let p of pages\" [class.active]=\"p === page\" (click)=\"changePage(p)\">{{p}}</span>\n      <button [disabled]=\"page === totalPages\" (click)=\"changePage(page + 1)\">Next</button>\n    </div>\n  `\n})\nexport class PaginationComponent {\n  @Input() page = 1;\n  @Input() totalPages = 1;\n  @Output() pageChange = new EventEmitter<number>();\n  get pages() { return Array.from({ length: this.totalPages }, (_, i) => i + 1); }\n  changePage(p: number) { this.page = p; this.pageChange.emit(p); }\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "ui/table.component.ts",
+      "content": "\nimport { Component, Input, Output, EventEmitter } from '@angular/core';\n\nexport interface TableColumn { key: string; label: string; sortable?: boolean; }\n\n@Component({\n  selector: 'app-table',\n  template: `\n    <table>\n      <thead>\n        <tr>\n          <th *ngFor=\"let col of columns\" (click)=\"col.sortable && sort(col.key)\">\n            {{col.label}} <span *ngIf=\"sortKey === col.key\">{{sortDir === 'asc' ? '▲' : '▼'}}</span>\n          </th>\n        </tr>\n      </thead>\n      <tbody>\n        <tr *ngFor=\"let row of data\" (click)=\"rowClick.emit(row)\">\n          <td *ngFor=\"let col of columns\">{{row[col.key]}}</td>\n        </tr>\n      </tbody>\n    </table>\n  `\n})\nexport class TableComponent {\n  @Input() columns: TableColumn[] = [];\n  @Input() data: any[] = [];\n  @Output() rowClick = new EventEmitter<any>();\n  @Output() sortChange = new EventEmitter<{key: string, dir: string}>();\n  sortKey = '';\n  sortDir = 'asc';\n  sort(key: string) {\n    this.sortDir = this.sortKey === key && this.sortDir === 'asc' ? 'desc' : 'asc';\n    this.sortKey = key;\n    this.sortChange.emit({ key, dir: this.sortDir });\n  }\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "ui/tooltip.directive.ts",
+      "content": "\nimport { Directive, Input, ElementRef, HostListener } from '@angular/core';\n\n@Directive({ selector: '[appTooltip]' })\nexport class TooltipDirective {\n  @Input('appTooltip') text = '';\n  private tooltip: HTMLElement | null = null;\n\n  constructor(private el: ElementRef) {}\n\n  @HostListener('mouseenter') show() {\n    this.tooltip = document.createElement('div');\n    this.tooltip.className = 'tooltip';\n    this.tooltip.textContent = this.text;\n    document.body.appendChild(this.tooltip);\n    const rect = this.el.nativeElement.getBoundingClientRect();\n    this.tooltip.style.top = rect.top - 30 + 'px';\n    this.tooltip.style.left = rect.left + 'px';\n  }\n\n  @HostListener('mouseleave') hide() {\n    if (this.tooltip) { this.tooltip.remove(); this.tooltip = null; }\n  }\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "ui/ui.module.ts",
+      "content": "\nimport { NgModule } from '@angular/core';\nimport { CommonModule } from '@angular/common';\nimport { FormsModule } from '@angular/forms';\nimport { ButtonComponent } from './button.component';\nimport { InputComponent } from './input.component';\nimport { ModalComponent } from './modal.component';\nimport { DropdownComponent } from './dropdown.component';\nimport { TableComponent } from './table.component';\nimport { PaginationComponent } from './pagination.component';\nimport { TooltipDirective } from './tooltip.directive';\nimport { LoadingComponent } from './loading.component';\nimport { AlertComponent } from './alert.component';\n\n@NgModule({\n  imports: [CommonModule, FormsModule],\n  declarations: [ButtonComponent, InputComponent, ModalComponent, DropdownComponent, TableComponent, PaginationComponent, TooltipDirective, LoadingComponent, AlertComponent],\n  exports: [ButtonComponent, InputComponent, ModalComponent, DropdownComponent, TableComponent, PaginationComponent, TooltipDirective, LoadingComponent, AlertComponent]\n})\nexport class UiModule {}\n",
+      "dependencies": [
+        "ui/button.component.ts",
+        "ui/input.component.ts",
+        "ui/modal.component.ts",
+        "ui/dropdown.component.ts",
+        "ui/table.component.ts",
+        "ui/pagination.component.ts",
+        "ui/tooltip.directive.ts",
+        "ui/loading.component.ts",
+        "ui/alert.component.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "utils/array.utils.ts",
+      "content": "\nexport function unique<T>(arr: T[]): T[] {\n  return [...new Set(arr)];\n}\n\nexport function groupBy<T>(arr: T[], key: keyof T): Record<string, T[]> {\n  return arr.reduce((acc, item) => {\n    const k = String(item[key]);\n    (acc[k] = acc[k] || []).push(item);\n    return acc;\n  }, {} as Record<string, T[]>);\n}\n\nexport function sortBy<T>(arr: T[], key: keyof T, dir: 'asc' | 'desc' = 'asc'): T[] {\n  return [...arr].sort((a, b) => {\n    const mult = dir === 'asc' ? 1 : -1;\n    return a[key] > b[key] ? mult : -mult;\n  });\n}\n\nexport function chunk<T>(arr: T[], size: number): T[][] {\n  const result: T[][] = [];\n  for (let i = 0; i < arr.length; i += size) {\n    result.push(arr.slice(i, i + size));\n  }\n  return result;\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "utils/date-helpers.ts",
+      "content": "\nexport function parseISO(dateStr: string): Date {\n  return new Date(dateStr);\n}\n\nexport function format(date: Date, pattern: string): string {\n  const map: Record<string, string> = {\n    'yyyy': date.getFullYear().toString(),\n    'MM': (date.getMonth() + 1).toString().padStart(2, '0'),\n    'dd': date.getDate().toString().padStart(2, '0'),\n    'HH': date.getHours().toString().padStart(2, '0'),\n    'mm': date.getMinutes().toString().padStart(2, '0'),\n  };\n  return pattern.replace(/yyyy|MM|dd|HH|mm/g, m => map[m]);\n}\n\nexport function formatDistance(date: Date, base: Date, opts?: { addSuffix?: boolean }): string {\n  const diff = Math.abs(base.getTime() - date.getTime());\n  const days = Math.floor(diff / (1000 * 60 * 60 * 24));\n  const suffix = opts?.addSuffix ? (date < base ? ' ago' : ' from now') : '';\n  if (days === 0) return 'today';\n  if (days === 1) return '1 day' + suffix;\n  return days + ' days' + suffix;\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "utils/date.utils.ts",
+      "content": "\nimport { formatDistance, format, parseISO } from './date-helpers';\n\nexport function formatDate(date: Date | string, pattern = 'yyyy-MM-dd'): string {\n  const d = typeof date === 'string' ? parseISO(date) : date;\n  return format(d, pattern);\n}\n\nexport function formatRelative(date: Date | string): string {\n  const d = typeof date === 'string' ? parseISO(date) : date;\n  return formatDistance(d, new Date(), { addSuffix: true });\n}\n\nexport function isToday(date: Date): boolean {\n  const today = new Date();\n  return date.toDateString() === today.toDateString();\n}\n\nexport function addDays(date: Date, days: number): Date {\n  const result = new Date(date);\n  result.setDate(result.getDate() + days);\n  return result;\n}\n",
+      "dependencies": [
+        "utils/date-helpers.ts"
+      ],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "utils/http.utils.ts",
+      "content": "\nexport function buildQueryString(params: Record<string, any>): string {\n  return Object.entries(params)\n    .filter(([_, v]) => v !== undefined && v !== null)\n    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)\n    .join('&');\n}\n\nexport function parseQueryString(qs: string): Record<string, string> {\n  return Object.fromEntries(new URLSearchParams(qs));\n}\n\nexport function joinUrl(...parts: string[]): string {\n  return parts.map(p => p.replace(/^\\/|\\/$/g, '')).join('/');\n}\n\nexport async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {\n  const res = await fetch(url, options);\n  if (!res.ok) throw new Error(`HTTP ${res.status}`);\n  return res.json();\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "utils/index.ts",
+      "content": "\nexport * from './date.utils';\nexport * from './date-helpers';\nexport * from './string.utils';\nexport * from './number.utils';\nexport * from './array.utils';\nexport * from './validation.utils';\nexport * from './storage.utils';\nexport * from './http.utils';\nexport * from './object.utils';\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "utils/number.utils.ts",
+      "content": "\nexport function formatCurrency(amount: number, currency = 'USD'): string {\n  return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);\n}\n\nexport function formatPercent(value: number, decimals = 0): string {\n  return (value * 100).toFixed(decimals) + '%';\n}\n\nexport function clamp(value: number, min: number, max: number): number {\n  return Math.min(Math.max(value, min), max);\n}\n\nexport function round(value: number, decimals: number): number {\n  const factor = Math.pow(10, decimals);\n  return Math.round(value * factor) / factor;\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "utils/object.utils.ts",
+      "content": "\nexport function pick<T extends object, K extends keyof T>(obj: T, keys: K[]): Pick<T, K> {\n  return keys.reduce((acc, key) => { acc[key] = obj[key]; return acc; }, {} as Pick<T, K>);\n}\n\nexport function omit<T extends object, K extends keyof T>(obj: T, keys: K[]): Omit<T, K> {\n  const result = { ...obj };\n  keys.forEach(k => delete (result as any)[k]);\n  return result;\n}\n\nexport function deepClone<T>(obj: T): T {\n  return JSON.parse(JSON.stringify(obj));\n}\n\nexport function isEmpty(obj: object): boolean {\n  return Object.keys(obj).length === 0;\n}\n\nexport function merge<T extends object>(target: T, ...sources: Partial<T>[]): T {\n  return Object.assign({}, target, ...sources);\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "utils/storage.utils.ts",
+      "content": "\nexport function getItem<T>(key: string): T | null {\n  const item = localStorage.getItem(key);\n  return item ? JSON.parse(item) : null;\n}\n\nexport function setItem<T>(key: string, value: T): void {\n  localStorage.setItem(key, JSON.stringify(value));\n}\n\nexport function removeItem(key: string): void {\n  localStorage.removeItem(key);\n}\n\nexport function clear(): void {\n  localStorage.clear();\n}\n\nexport function getSessionItem<T>(key: string): T | null {\n  const item = sessionStorage.getItem(key);\n  return item ? JSON.parse(item) : null;\n}\n\nexport function setSessionItem<T>(key: string, value: T): void {\n  sessionStorage.setItem(key, JSON.stringify(value));\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "utils/string.utils.ts",
+      "content": "\nexport function capitalize(str: string): string {\n  return str.charAt(0).toUpperCase() + str.slice(1);\n}\n\nexport function truncate(str: string, len: number): string {\n  return str.length > len ? str.slice(0, len) + '...' : str;\n}\n\nexport function slugify(str: string): string {\n  return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');\n}\n\nexport function camelToKebab(str: string): string {\n  return str.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();\n}\n\nexport function kebabToCamel(str: string): string {\n  return str.replace(/-([a-z])/g, (_, c) => c.toUpperCase());\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "utils/validation.utils.ts",
+      "content": "\nexport function isEmail(value: string): boolean {\n  return /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(value);\n}\n\nexport function isPhone(value: string): boolean {\n  return /^\\+?[\\d\\s-]{10,}$/.test(value);\n}\n\nexport function isUrl(value: string): boolean {\n  try { new URL(value); return true; } catch { return false; }\n}\n\nexport function minLength(value: string, min: number): boolean {\n  return value.length >= min;\n}\n\nexport function maxLength(value: string, max: number): boolean {\n  return value.length <= max;\n}\n\nexport function required(value: any): boolean {\n  return value !== null && value !== undefined && value !== '';\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "isolated/animations.ts",
+      "content": "\n// Standalone animation definitions - no dependencies\nexport const fadeIn = {\n  from: { opacity: 0 },\n  to: { opacity: 1 },\n  duration: 300,\n};\n\nexport const slideUp = {\n  from: { transform: 'translateY(20px)', opacity: 0 },\n  to: { transform: 'translateY(0)', opacity: 1 },\n  duration: 400,\n};\n\nexport const scaleIn = {\n  from: { transform: 'scale(0.9)', opacity: 0 },\n  to: { transform: 'scale(1)', opacity: 1 },\n  duration: 250,\n};\n\nexport const EASING = {\n  linear: 'linear',\n  easeIn: 'cubic-bezier(0.4, 0, 1, 1)',\n  easeOut: 'cubic-bezier(0, 0, 0.2, 1)',\n  easeInOut: 'cubic-bezier(0.4, 0, 0.2, 1)',\n};\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "isolated/color-utils.ts",
+      "content": "\n// Standalone color utilities - no dependencies\nexport function hexToRgb(hex: string): { r: number; g: number; b: number } | null {\n  const result = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex);\n  return result ? {\n    r: parseInt(result[1], 16),\n    g: parseInt(result[2], 16),\n    b: parseInt(result[3], 16)\n  } : null;\n}\n\nexport function rgbToHex(r: number, g: number, b: number): string {\n  return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');\n}\n\nexport function lighten(hex: string, percent: number): string {\n  const rgb = hexToRgb(hex);\n  if (!rgb) return hex;\n  const factor = 1 + percent / 100;\n  return rgbToHex(\n    Math.min(255, Math.round(rgb.r * factor)),\n    Math.min(255, Math.round(rgb.g * factor)),\n    Math.min(255, Math.round(rgb.b * factor))\n  );\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "isolated/constants.ts",
+      "content": "\n// Pure constants - no dependencies\nexport const APP_NAME = 'MyApp';\nexport const VERSION = '1.0.0';\nexport const API_TIMEOUT = 30000;\nexport const MAX_RETRIES = 3;\nexport const DEFAULT_PAGE_SIZE = 20;\nexport const SUPPORTED_LANGUAGES = ['en', 'es', 'fr', 'de'];\nexport const THEME_OPTIONS = ['light', 'dark', 'system'];\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "isolated/crypto-utils.ts",
+      "content": "\n// Standalone crypto utilities - no dependencies (uses native APIs)\nexport function hashString(str: string): number {\n  let hash = 0;\n  for (let i = 0; i < str.length; i++) {\n    const char = str.charCodeAt(i);\n    hash = ((hash << 5) - hash) + char;\n    hash = hash & hash;\n  }\n  return hash;\n}\n\nexport function base64Encode(str: string): string {\n  return btoa(encodeURIComponent(str));\n}\n\nexport function base64Decode(str: string): string {\n  return decodeURIComponent(atob(str));\n}\n\nexport function randomString(length: number): string {\n  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';\n  return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "isolated/env-config.ts",
+      "content": "\n// Environment configuration - no dependencies\nexport const ENV = {\n  production: false,\n  apiUrl: 'http://localhost:3000/api',\n  appTitle: 'Development App',\n  logLevel: 'debug',\n  features: {\n    darkMode: true,\n    analytics: false,\n    betaFeatures: true,\n  }\n};\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "isolated/error-codes.ts",
+      "content": "\n// Error code constants - no dependencies\nexport enum ErrorCode {\n  UNKNOWN = 'E000',\n  NETWORK_ERROR = 'E001',\n  TIMEOUT = 'E002',\n  UNAUTHORIZED = 'E401',\n  FORBIDDEN = 'E403',\n  NOT_FOUND = 'E404',\n  VALIDATION_ERROR = 'E422',\n  SERVER_ERROR = 'E500',\n}\n\nexport const ERROR_MESSAGES: Record<ErrorCode, string> = {\n  [ErrorCode.UNKNOWN]: 'An unknown error occurred',\n  [ErrorCode.NETWORK_ERROR]: 'Network connection failed',\n  [ErrorCode.TIMEOUT]: 'Request timed out',\n  [ErrorCode.UNAUTHORIZED]: 'Authentication required',\n  [ErrorCode.FORBIDDEN]: 'Access denied',\n  [ErrorCode.NOT_FOUND]: 'Resource not found',\n  [ErrorCode.VALIDATION_ERROR]: 'Validation failed',\n  [ErrorCode.SERVER_ERROR]: 'Server error',\n};\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "isolated/math-helpers.ts",
+      "content": "\n// Standalone math functions - no dependencies\nexport function factorial(n: number): number {\n  if (n <= 1) return 1;\n  return n * factorial(n - 1);\n}\n\nexport function fibonacci(n: number): number {\n  if (n <= 1) return n;\n  return fibonacci(n - 1) + fibonacci(n - 2);\n}\n\nexport function isPrime(n: number): boolean {\n  if (n < 2) return false;\n  for (let i = 2; i <= Math.sqrt(n); i++) {\n    if (n % i === 0) return false;\n  }\n  return true;\n}\n\nexport function gcd(a: number, b: number): number {\n  return b === 0 ? a : gcd(b, a % b);\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "isolated/regex-patterns.ts",
+      "content": "\n// Standalone regex patterns - no dependencies\nexport const EMAIL_PATTERN = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$/;\nexport const PHONE_PATTERN = /^\\+?[1-9]\\d{1,14}$/;\nexport const URL_PATTERN = /^https?:\\/\\/[^\\s]+$/;\nexport const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nexport const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "isolated/standalone-helper.ts",
+      "content": "\n// This file has NO imports - completely standalone\nexport function generateId(): string {\n  return Math.random().toString(36).substring(2, 15);\n}\n\nexport function sleep(ms: number): Promise<void> {\n  return new Promise(resolve => setTimeout(resolve, ms));\n}\n\nexport function debounce<T extends (...args: any[]) => any>(fn: T, delay: number): T {\n  let timeout: any;\n  return ((...args: any[]) => {\n    clearTimeout(timeout);\n    timeout = setTimeout(() => fn(...args), delay);\n  }) as T;\n}\n",
+      "dependencies": [],
+      "status": "conflict"
+    },
+    {
+      "relativePath": "isolated/types.ts",
+      "content": "\n// Pure type definitions - no runtime dependencies\nexport type ID = string | number;\nexport type Nullable<T> = T | null;\nexport type Optional<T> = T | undefined;\nexport interface Dictionary<T> { [key: string]: T; }\nexport type DeepPartial<T> = { [P in keyof T]?: DeepPartial<T[P]>; };\nexport type ValueOf<T> = T[keyof T];\n",
+      "dependencies": [],
+      "status": "conflict"
+    }
+  ],
+  "stats": {
+    "totalFiles": 80
+  },
+  "cleanSubtrees": [],
+  "bottlenecks": []
+}
