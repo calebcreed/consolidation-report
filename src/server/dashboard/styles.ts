@@ -308,4 +308,61 @@ export const DASHBOARD_STYLES = `
     .community-8 { fill: #ffa657; stroke: #ffa657; }
     .community-9 { fill: #ff7b72; stroke: #ff7b72; }
     .community-unassigned { fill: #484f58; stroke: #6e7681; }
+
+    /* Impact-ordered cards */
+    .cluster-order {
+      font-size: 18px;
+      font-weight: 700;
+      color: #8b949e;
+      margin-right: 12px;
+    }
+    .cluster-card-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .cluster-badge {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      margin-left: auto;
+    }
+    .badge-leaf { background: #238636; color: #3fb950; }
+    .badge-layer { background: #1f6feb33; color: #58a6ff; }
+
+    .cluster-metrics {
+      display: flex;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid #21262d;
+      margin-bottom: 8px;
+    }
+    .cluster-metric { font-size: 11px; color: #8b949e; }
+    .cluster-metric-value { color: #c9d1d9; font-weight: 600; }
+    .impact-value { color: #3fb950; }
+
+    .cluster-unlocks {
+      padding: 8px;
+      background: #0d1117;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      font-size: 11px;
+    }
+    .unlock-label { color: #8b949e; margin-right: 6px; }
+    .unlock-files { color: #58a6ff; }
+
+    /* Depth-based card styling */
+    .cluster-card.depth-0 { border-left-color: #3fb950 !important; }
+    .cluster-card.depth-1 { border-left-color: #58a6ff !important; }
+    .cluster-card.depth-2 { border-left-color: #a371f7 !important; }
+    .cluster-card.depth-3 { border-left-color: #f0883e !important; }
+
+    /* Cards grid - single column ordered list */
+    .cluster-cards-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
 `;

@@ -306,29 +306,51 @@ export const CLUSTER_SCRIPT = `
 
     function renderClusterCards() {
       const container = document.getElementById('cluster-cards');
-      const colors = ['#3fb950', '#58a6ff', '#a371f7', '#f0883e', '#db61a2', '#7ee787', '#79c0ff', '#d2a8ff', '#ffa657', '#ff7b72'];
+
+      // Depth-based colors (leaves = green, deeper = blue/purple)
+      const depthColors = {
+        0: '#3fb950', // leaves - green
+        1: '#58a6ff', // layer 1 - blue
+        2: '#a371f7', // layer 2 - purple
+        3: '#f0883e', // layer 3+ - orange
+      };
 
       container.innerHTML = CLUSTERS.packages.map((pkg, idx) => {
-        const color = colors[pkg.id % colors.length];
-        const filesHtml = pkg.files.slice(0, 10).map(f =>
+        const depth = pkg.depth || 0;
+        const color = depthColors[Math.min(depth, 3)];
+        const isLeaf = pkg.isLeafCluster || depth === 0;
+        const impactScore = pkg.impactScore || pkg.cohesion || 0;
+        const unlockCount = pkg.unlockCount || 0;
+        const unlockFiles = pkg.unlockFiles || [];
+
+        const filesHtml = pkg.files.slice(0, 8).map(f =>
           '<div class="cluster-file" draggable="true" data-file="' + escapeHtml(f) + '" data-cluster="' + pkg.id + '">' + escapeHtml(f.split('/').pop()) + '</div>'
         ).join('');
 
-        const moreCount = pkg.files.length - 10;
+        const moreCount = pkg.files.length - 8;
         const moreHtml = moreCount > 0 ? '<div class="cluster-file-count">+ ' + moreCount + ' more files</div>' : '';
 
+        // Show what this unlocks
+        const unlocksHtml = unlockCount > 0 ? \`
+          <div class="cluster-unlocks">
+            <span class="unlock-label">Unlocks:</span>
+            <span class="unlock-files">\${unlockFiles.slice(0, 3).map(f => f.split('/').pop()).join(', ')}\${unlockCount > 3 ? '...' : ''}</span>
+          </div>
+        \` : '';
+
         return \`
-          <div class="cluster-card" data-cluster-id="\${pkg.id}" ondragover="handleClusterDragOver(event)" ondragleave="handleClusterDragLeave(event)" ondrop="handleClusterDrop(event, \${pkg.id})">
+          <div class="cluster-card depth-\${depth}" data-cluster-id="\${pkg.id}" style="border-left: 4px solid \${color};" ondragover="handleClusterDragOver(event)" ondragleave="handleClusterDragLeave(event)" ondrop="handleClusterDrop(event, \${pkg.id})">
             <div class="cluster-card-header">
+              <div class="cluster-order">#\${idx + 1}</div>
               <div class="cluster-name" contenteditable="true" data-cluster-id="\${pkg.id}" onblur="saveClusterName(this)" onkeydown="handleNameKeydown(event, this)">\${escapeHtml(pkg.name)}</div>
-              <div class="cluster-metrics">
-                <span class="cluster-metric"><span class="cluster-metric-value">\${pkg.files.length}</span> files</span>
-                <span class="cluster-metric">cohesion: <span class="cluster-metric-value">\${pkg.cohesion}</span></span>
-              </div>
+              <div class="cluster-badge \${isLeaf ? 'badge-leaf' : 'badge-layer'}">\${isLeaf ? 'LEAF' : 'Layer ' + depth}</div>
             </div>
-            <div class="cluster-mini-graph" id="mini-graph-\${pkg.id}">
-              <svg></svg>
+            <div class="cluster-metrics">
+              <span class="cluster-metric"><span class="cluster-metric-value">\${pkg.files.length}</span> files</span>
+              <span class="cluster-metric">impact: <span class="cluster-metric-value impact-value">\${impactScore.toFixed(2)}</span></span>
+              \${unlockCount > 0 ? '<span class="cluster-metric">unlocks: <span class="cluster-metric-value">' + unlockCount + '</span></span>' : ''}
             </div>
+            \${unlocksHtml}
             <div class="cluster-files">\${filesHtml}</div>
             \${moreHtml}
           </div>

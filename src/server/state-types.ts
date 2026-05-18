@@ -51,6 +51,12 @@ export interface WorkPackageState {
   cohesion: number;
   internalEdges: number;
   externalEdges: number;
+  // Leafward clustering fields
+  impactScore?: number;      // Higher = do this first
+  unlockCount?: number;      // Files unlocked by completing this
+  unlockFiles?: string[];    // Sample of files unlocked
+  depth?: number;            // 0 = leaves, higher = further from leaves
+  isLeafCluster?: boolean;   // True if all files are leaves
 }
 
 export interface ClusterState {
