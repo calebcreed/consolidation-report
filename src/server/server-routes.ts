@@ -12,7 +12,7 @@ import { runAnalysis } from './server-analysis';
 import { discoverFileTypes } from './server-utils';
 import { generateInteractiveHtml } from './html';
 import { runClusteringWithProgress } from './server-clustering';
-import { analyzeGitHistory } from '../git/commit-clustering';
+import { analyzeGitHistory, exploreGitHistory } from '../git/commit-clustering';
 
 export function createRoutes(
   stateManager: StateManager,
@@ -386,6 +386,36 @@ export function createRoutes(
     const clusters = stateManager.getClusters();
     const html = generateInteractiveHtml(report, config, clusters);
     res.type('html').send(html);
+  });
+
+  // API: Explore git history to find landmarks
+  router.post('/api/git-explore', (req: Request, res: Response) => {
+    try {
+      const config = stateManager.getConfig();
+      if (!config) {
+        return res.status(400).json({ error: 'No config set' });
+      }
+
+      const {
+        branchA = 'origin/master',
+        branchB = 'origin/retail-master',
+      } = req.body;
+
+      wsManager.output(`Exploring git history: ${branchA} vs ${branchB}...`);
+
+      const result = exploreGitHistory(config.projectPath, branchA, branchB);
+
+      wsManager.output(`Merge base: ${result.mergeBase || 'none'}`);
+      wsManager.output(`Branch A root: ${result.branchARoot?.slice(0, 8) || 'unknown'}`);
+      wsManager.output(`Branch B root: ${result.branchBRoot?.slice(0, 8) || 'unknown'}`);
+      wsManager.output(`Merge commits found: ${result.mergeCommits.length}`);
+      wsManager.output(`Recommendation: ${result.recommendation}`);
+
+      res.json(result);
+    } catch (e: any) {
+      wsManager.output(`Git exploration failed: ${e.message}`);
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // API: Analyze git history for commit-based clustering

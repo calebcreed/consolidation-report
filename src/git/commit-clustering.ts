@@ -291,6 +291,142 @@ export function findConflictFiles(
 }
 
 /**
+ * Exploratory analysis - find landmarks in the git history
+ */
+export interface GitExploration {
+  mergeBase: string | null;
+  branchARoot: string | null;
+  branchBRoot: string | null;
+  branchAOldest: { hash: string; date: string; message: string } | null;
+  branchBOldest: { hash: string; date: string; message: string } | null;
+  mergeCommits: { hash: string; date: string; message: string }[];
+  divergenceEstimate: string | null;  // Best guess at when they diverged
+  recommendation: string;
+}
+
+export function exploreGitHistory(
+  repoPath: string,
+  branchA: string,
+  branchB: string
+): GitExploration {
+  const result: GitExploration = {
+    mergeBase: null,
+    branchARoot: null,
+    branchBRoot: null,
+    branchAOldest: null,
+    branchBOldest: null,
+    mergeCommits: [],
+    divergenceEstimate: null,
+    recommendation: '',
+  };
+
+  // Try to find merge-base
+  try {
+    const mergeBase = execSync(`git merge-base ${branchA} ${branchB}`, {
+      cwd: repoPath,
+      encoding: 'utf-8',
+    }).trim();
+    if (mergeBase) {
+      result.mergeBase = mergeBase;
+    }
+  } catch (e) {
+    // No merge base - separate histories
+  }
+
+  // Find root commits (initial commits) for each branch
+  try {
+    const rootsA = execSync(`git rev-list --max-parents=0 ${branchA}`, {
+      cwd: repoPath,
+      encoding: 'utf-8',
+    }).trim().split('\n');
+    result.branchARoot = rootsA[0] || null;
+
+    const rootsB = execSync(`git rev-list --max-parents=0 ${branchB}`, {
+      cwd: repoPath,
+      encoding: 'utf-8',
+    }).trim().split('\n');
+    result.branchBRoot = rootsB[0] || null;
+  } catch (e) {
+    // Ignore
+  }
+
+  // Get oldest commit info for each branch
+  try {
+    const oldestA = execSync(
+      `git log ${branchA} --reverse --format="%H|%ci|%s" -1`,
+      { cwd: repoPath, encoding: 'utf-8' }
+    ).trim();
+    if (oldestA) {
+      const [hash, date, ...msg] = oldestA.split('|');
+      result.branchAOldest = { hash, date, message: msg.join('|') };
+    }
+
+    const oldestB = execSync(
+      `git log ${branchB} --reverse --format="%H|%ci|%s" -1`,
+      { cwd: repoPath, encoding: 'utf-8' }
+    ).trim();
+    if (oldestB) {
+      const [hash, date, ...msg] = oldestB.split('|');
+      result.branchBOldest = { hash, date, message: msg.join('|') };
+    }
+  } catch (e) {
+    // Ignore
+  }
+
+  // Find merge commits (where histories were joined)
+  try {
+    // Look for commits with multiple parents on both branches
+    const mergesA = execSync(
+      `git log ${branchA} --merges --format="%H|%ci|%s" -10`,
+      { cwd: repoPath, encoding: 'utf-8' }
+    ).trim();
+
+    if (mergesA) {
+      for (const line of mergesA.split('\n')) {
+        if (!line) continue;
+        const [hash, date, ...msg] = line.split('|');
+        result.mergeCommits.push({ hash, date, message: msg.join('|') });
+      }
+    }
+  } catch (e) {
+    // Ignore
+  }
+
+  // Look for "Merge branch" commits that might indicate where histories joined
+  try {
+    const unrelatedMerges = execSync(
+      `git log ${branchA} ${branchB} --all --grep="allow-unrelated\\|Merge branch" --format="%H|%ci|%s" -5`,
+      { cwd: repoPath, encoding: 'utf-8' }
+    ).trim();
+
+    if (unrelatedMerges) {
+      for (const line of unrelatedMerges.split('\n')) {
+        if (!line) continue;
+        const [hash, date, ...msg] = line.split('|');
+        if (!result.mergeCommits.find(m => m.hash === hash)) {
+          result.mergeCommits.push({ hash, date, message: msg.join('|') });
+        }
+      }
+    }
+  } catch (e) {
+    // Ignore
+  }
+
+  // Generate recommendation
+  if (result.mergeBase) {
+    result.divergenceEstimate = result.mergeBase;
+    result.recommendation = `Found merge-base: ${result.mergeBase.slice(0, 8)}. Use this as the divergence point.`;
+  } else if (result.mergeCommits.length > 0) {
+    result.divergenceEstimate = result.mergeCommits[0].hash;
+    result.recommendation = `No merge-base (separate histories). Found ${result.mergeCommits.length} merge commits. The histories were likely joined with --allow-unrelated-histories. Analyze all commits on each branch.`;
+  } else {
+    result.recommendation = `No merge-base and no merge commits found. These branches appear to have completely separate histories. Analyze recent commits (last 500-1000) on each branch.`;
+  }
+
+  return result;
+}
+
+/**
  * Main analysis function - analyze both branches and produce report
  */
 export function analyzeGitHistory(
