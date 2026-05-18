@@ -11,6 +11,7 @@ import { RENDER_SCRIPT } from './render';
 import { GRAPH_SCRIPT } from './graph';
 import { TIMELINE_SCRIPT } from './timeline';
 import { CLUSTER_SCRIPT } from './cluster';
+import { GIT_SCRIPT } from './git';
 import { INIT_SCRIPT } from './init';
 
 /**
@@ -36,6 +37,7 @@ export function generateDashboardScripts(reportJson: string, configJson: string,
     ${GRAPH_SCRIPT}
     ${TIMELINE_SCRIPT}
     ${CLUSTER_SCRIPT}
+    ${GIT_SCRIPT}
     ${INIT_SCRIPT}
   `;
 }

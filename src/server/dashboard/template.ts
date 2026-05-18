@@ -91,6 +91,7 @@ export const DASHBOARD_TEMPLATE = `
           <button class="tab" data-tab="bottlenecks">Bottlenecks</button>
           <button class="tab" data-tab="timeline">Timeline</button>
           <button class="tab" data-tab="clusters">Clusters</button>
+          <button class="tab" data-tab="git">Git Analysis</button>
         </div>
 
         <div id="discovery" class="tab-content">
@@ -224,6 +225,45 @@ export const DASHBOARD_TEMPLATE = `
             <div class="empty-state">
               <div class="empty-state-icon">🔗</div>
               <div>Run analysis first, then click "Run Clustering" to group conflict files into work packages.</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="git" class="tab-content">
+          <p class="subtitle">Analyze git history to find files that change together (better than dependency analysis).</p>
+
+          <!-- Git config inputs -->
+          <div class="git-config" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+            <div class="config-field">
+              <label>Branch A (master)</label>
+              <input type="text" id="git-branch-a" value="origin/master" placeholder="origin/master">
+            </div>
+            <div class="config-field">
+              <label>Branch B (retail)</label>
+              <input type="text" id="git-branch-b" value="origin/retail-master" placeholder="origin/retail-master">
+            </div>
+            <div class="config-field">
+              <label>Filter Path</label>
+              <input type="text" id="git-filter-path" value="apps/app/src" placeholder="apps/app/src">
+            </div>
+            <div class="config-field">
+              <label>Commit Limit</label>
+              <input type="number" id="git-commit-limit" value="500" placeholder="500">
+            </div>
+          </div>
+
+          <!-- Action buttons -->
+          <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+            <button class="btn" onclick="gitExplore()">Explore History</button>
+            <button class="btn btn-primary" onclick="gitAnalyze()">Analyze Commits</button>
+            <span id="git-status" style="color: #8b949e; font-size: 13px; align-self: center;"></span>
+          </div>
+
+          <!-- Results area -->
+          <div id="git-results" class="list-container" style="max-height: 600px;">
+            <div class="empty-state">
+              <div class="empty-state-icon">📜</div>
+              <div>Click "Explore History" to find merge points, or "Analyze Commits" to cluster by commit history.</div>
             </div>
           </div>
         </div>
