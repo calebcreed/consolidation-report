@@ -12,6 +12,7 @@ import { runAnalysis } from './server-analysis';
 import { discoverFileTypes } from './server-utils';
 import { generateInteractiveHtml } from './html';
 import { runClusteringWithProgress } from './server-clustering';
+import { analyzeGitHistory } from '../git/commit-clustering';
 
 export function createRoutes(
   stateManager: StateManager,
@@ -385,6 +386,45 @@ export function createRoutes(
     const clusters = stateManager.getClusters();
     const html = generateInteractiveHtml(report, config, clusters);
     res.type('html').send(html);
+  });
+
+  // API: Analyze git history for commit-based clustering
+  router.post('/api/git-analyze', (req: Request, res: Response) => {
+    try {
+      const config = stateManager.getConfig();
+      if (!config) {
+        return res.status(400).json({ error: 'No config set' });
+      }
+
+      const {
+        branchA = 'origin/master',
+        branchB = 'origin/retail-master',
+        filterPath = 'apps/app/src',
+        commitLimit = 500,
+      } = req.body;
+
+      wsManager.output(`Analyzing git history: ${branchA} vs ${branchB}...`);
+      wsManager.output(`Filter path: ${filterPath}, Limit: ${commitLimit} commits`);
+
+      const result = analyzeGitHistory(
+        config.projectPath,
+        branchA,
+        branchB,
+        filterPath,
+        commitLimit
+      );
+
+      wsManager.output(`Found ${result.branchA.totalCommits} commits on ${branchA}`);
+      wsManager.output(`Found ${result.branchB.totalCommits} commits on ${branchB}`);
+      wsManager.output(`${result.conflicts.length} files touched by both branches`);
+      wsManager.output(`${result.branchA.clusters.length} clusters on ${branchA}`);
+      wsManager.output(`${result.branchB.clusters.length} clusters on ${branchB}`);
+
+      res.json(result);
+    } catch (e: any) {
+      wsManager.output(`Git analysis failed: ${e.message}`);
+      res.status(500).json({ error: e.message });
+    }
   });
 
   return router;
