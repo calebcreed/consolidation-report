@@ -8,39 +8,46 @@ set -e
 # Configuration - adjust these paths as needed
 WEBPOS_REPO="/workspaces/webpos"
 CONSOLIDATOR_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORKTREE_DIR="/workspaces"
 
 echo "=== Updating branches ==="
 echo "WebPOS repo: $WEBPOS_REPO"
 echo "Consolidator: $CONSOLIDATOR_DIR"
 echo ""
 
-# Fetch latest (using -C to target the correct repo)
+# Remember current branch
+CURRENT_BRANCH=$(git -C "$WEBPOS_REPO" rev-parse --abbrev-ref HEAD)
+echo "Current branch: $CURRENT_BRANCH"
+
+# Fetch latest
 echo "Fetching latest from origin..."
 git -C "$WEBPOS_REPO" fetch origin
-
-# Clean up old worktrees if they exist
-echo "Setting up worktrees..."
-git -C "$WEBPOS_REPO" worktree remove "$WORKTREE_DIR/webpos-restaurant" 2>/dev/null || true
-git -C "$WEBPOS_REPO" worktree remove "$WORKTREE_DIR/webpos-retail" 2>/dev/null || true
-
-# Create fresh worktrees
-git -C "$WEBPOS_REPO" worktree add "$WORKTREE_DIR/webpos-restaurant" origin/master
-git -C "$WEBPOS_REPO" worktree add "$WORKTREE_DIR/webpos-retail" origin/retail-master
 
 # Create target directories if they don't exist
 mkdir -p "$CONSOLIDATOR_DIR/src/apps/restaurant"
 mkdir -p "$CONSOLIDATOR_DIR/src/apps/retail"
 
-# Clear existing and copy fresh
+# Checkout master and copy restaurant
 echo ""
+echo "Checking out origin/master..."
+git -C "$WEBPOS_REPO" checkout origin/master --quiet
+
 echo "Copying restaurant (master) source..."
 rm -rf "$CONSOLIDATOR_DIR/src/apps/restaurant/"*
-cp -r "$WORKTREE_DIR/webpos-restaurant/apps/app/src/"* "$CONSOLIDATOR_DIR/src/apps/restaurant/"
+cp -r "$WEBPOS_REPO/apps/app/src/"* "$CONSOLIDATOR_DIR/src/apps/restaurant/"
+
+# Checkout retail-master and copy retail
+echo ""
+echo "Checking out origin/retail-master..."
+git -C "$WEBPOS_REPO" checkout origin/retail-master --quiet
 
 echo "Copying retail (retail-master) source..."
 rm -rf "$CONSOLIDATOR_DIR/src/apps/retail/"*
-cp -r "$WORKTREE_DIR/webpos-retail/apps/app/src/"* "$CONSOLIDATOR_DIR/src/apps/retail/"
+cp -r "$WEBPOS_REPO/apps/app/src/"* "$CONSOLIDATOR_DIR/src/apps/retail/"
+
+# Go back to original branch
+echo ""
+echo "Returning to $CURRENT_BRANCH..."
+git -C "$WEBPOS_REPO" checkout "$CURRENT_BRANCH" --quiet 2>/dev/null || git -C "$WEBPOS_REPO" checkout origin/master --quiet
 
 # Count files
 RESTAURANT_COUNT=$(find "$CONSOLIDATOR_DIR/src/apps/restaurant" -type f -name "*.ts" | wc -l | tr -d ' ')
