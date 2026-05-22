@@ -15,21 +15,18 @@ echo "WebPOS repo: $WEBPOS_REPO"
 echo "Consolidator: $CONSOLIDATOR_DIR"
 echo ""
 
-# Navigate to webpos repo
-cd "$WEBPOS_REPO"
-
-# Fetch latest
+# Fetch latest (using -C to target the correct repo)
 echo "Fetching latest from origin..."
-git fetch origin
+git -C "$WEBPOS_REPO" fetch origin
 
 # Clean up old worktrees if they exist
 echo "Setting up worktrees..."
-git worktree remove "$WORKTREE_DIR/webpos-restaurant" 2>/dev/null || true
-git worktree remove "$WORKTREE_DIR/webpos-retail" 2>/dev/null || true
+git -C "$WEBPOS_REPO" worktree remove "$WORKTREE_DIR/webpos-restaurant" 2>/dev/null || true
+git -C "$WEBPOS_REPO" worktree remove "$WORKTREE_DIR/webpos-retail" 2>/dev/null || true
 
 # Create fresh worktrees
-git worktree add "$WORKTREE_DIR/webpos-restaurant" origin/master
-git worktree add "$WORKTREE_DIR/webpos-retail" origin/retail-master
+git -C "$WEBPOS_REPO" worktree add "$WORKTREE_DIR/webpos-restaurant" origin/master
+git -C "$WEBPOS_REPO" worktree add "$WORKTREE_DIR/webpos-retail" origin/retail-master
 
 # Create target directories if they don't exist
 mkdir -p "$CONSOLIDATOR_DIR/src/apps/restaurant"
