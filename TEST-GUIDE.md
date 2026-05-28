@@ -1,128 +1,308 @@
-# Branch Consolidator - Validation Test Guide
+# Branch Consolidator - Manual Test Guide
 
-Quick validation of the three acceptance criteria cards.
+This guide walks a reviewer through all features of the Branch Consolidator tool.
 
-## Setup
+**Estimated time:** 15-20 minutes
+
+**Prerequisites:**
+- Access to the Linga VM
+- WebPOS repo at `/workspaces/webpos`
+- Node.js installed
+
+---
+
+## 1. Setup
 
 ```bash
-cd /path/to/webpos-consolidator
+# Navigate to the consolidator
+cd /workspaces/webpos/consolidation-report
+
+# Pull latest
+git pull
+
+# Install dependencies (if needed)
 npm install
+
+# Build
 npm run build
+```
+
+**Expected:** Build completes without errors.
+
+---
+
+## 2. Update Source Data
+
+```bash
+# Fix git permissions if needed
+sudo chown -R $(whoami) /workspaces/webpos/.git
+
+# Run the update script
+./update-branches.sh
+```
+
+**Expected:**
+- Script fetches from origin
+- Copies restaurant (master) and retail (retail-master) source files
+- Shows file counts for both branches (should be 800+ TypeScript files each)
+
+---
+
+## 3. Start the Server
+
+```bash
 npm start
 ```
 
-Open http://localhost:3000 in your browser.
+**Expected:** Server starts on http://localhost:3000
+
+Open in browser: http://localhost:3000
 
 ---
 
-## Card 1: Dependency Detection Engine
+## 4. Configure the Project
 
-**Goal:** Verify the tool detects imports, NgRx patterns, and Angular module declarations.
+In the UI:
 
-1. Click **Analyze** button, wait for completion
-2. In the **All Files** tab, search for `interceptor`
-3. Click on `src/app/services/interceptor.ts` to expand
-4. **Verify:** Shows **8 dependencies** including:
-   - `src/app/models/user.ts` (relative import)
-   - `src/environments/environment.ts` (path alias `@env`)
-   - `src/app/core/state/state.constants.ts` (path alias `@app`)
+1. Click the **Configuration** panel to expand it
+2. Set the fields:
+   - **Project Path:** `/workspaces/webpos`
+   - **Build Command:** `npx tsc --noEmit`
+   - **Shared Path:** `apps/merged`
+   - **tsconfig Path:** `/workspaces/webpos/apps/app/tsconfig.app.json`
+3. Click **Save Configuration**
 
-5. Search for `store-json.reducer`
-6. Click to expand
-7. **Verify:** Shows dependency on `store-json.actions.ts` (NgRx action import)
-
-8. Search for `transfer-merge.module`
-9. Click to expand
-10. **Verify:** Shows 4 dependencies (SharedModule, StoreJsonModule, components barrel, services barrel)
-
-**Pass criteria:** All three files show their dependencies correctly.
+**Expected:** Configuration saves successfully.
 
 ---
 
-## Card 2: Clean Subtree Reports
+## 5. Run Analysis
 
-**Goal:** Verify clean subtrees are identified and bottlenecks show impact.
+1. Click the **Analyze** button in the header
 
-After analysis, check the **stats panel** at top:
-
-| Stat | Expected |
-|------|----------|
-| Total Files | 85 |
-| Clean | 38 |
-| Conflicts | 14 |
-| Clean Subtrees | 24 |
-| Bottlenecks | 1/1 |
-
-1. Click the **Clean Subtrees** tab
-2. **Verify:** Subtrees are listed with file counts, largest first
-
-3. Click the **Bottlenecks** tab
-4. **Verify:** Shows `store-json.actions.ts` with:
-   - Status: `conflict`
-   - Unlocks: **6 files**
-   - Click "Diff" to see the difference between branches
-
-**Pass criteria:** Stats match, bottleneck shows correct unlock count.
+**Expected:**
+- Output panel shows progress messages
+- Stats row appears showing:
+  - Total Files (~900)
+  - Clean files (~600)
+  - Conflict files (~270)
+  - Clean Subtrees count
+  - Bottlenecks count
 
 ---
 
-## Card 3: Move Capability
+## 6. Test Each Tab
 
-**Goal:** Verify migration moves files, build verifies imports, and rollback restores them.
+### 6.1 Clean Subtrees Tab
+1. Click **Clean Subtrees** tab
+2. Review the list of subtrees ranked by size
 
-1. Click the **Clean Subtrees** tab
-2. Find `src/app/shared/shared.module.ts` (2 files)
-3. Click **Migrate** button
-4. **Verify output panel shows:**
-   - "Migrating clean subtree: 2 files"
-   - "Moving files..."
-   - "Migration complete"
-   - Commit hash
+**Expected:** Shows list of clean subtrees with file counts and "Migrate" buttons.
 
-5. **Verify build runs automatically:**
-   - Shows: `$ npx tsc -p apps/merged/tsconfig.app.json --noEmit`
-   - Shows: `Build succeeded!`
-   - *(The build verifies that all import paths work after migration)*
+### 6.2 Conflicts Tab
+1. Click **Conflicts** tab
+2. Scroll through the conflict files
 
-6. Click **Rollback** button
-7. **Verify output panel shows:**
-   - "Rolling back..."
-   - "Rollback complete"
+**Expected:** Shows ~270 files with conflict status.
 
-8. *(Optional)* Verify filesystem:
+### 6.3 All Files Tab
+1. Click **All Files** tab
+2. Try the filter buttons (All, Clean, Conflicts, Restaurant Only, Retail Only)
+3. Try the search box - search for "auth" or "cart"
+
+**Expected:** Filters work correctly. Search narrows the list.
+
+### 6.4 Graph Tab
+1. Click **Graph** tab
+2. Click **Show Dependency Graph**
+3. Try zooming and panning
+4. Hover over nodes to see file names
+
+**Expected:** D3 graph renders with colored nodes (green=clean, red=conflict, etc.)
+
+### 6.5 Bottlenecks Tab
+1. Click **Bottlenecks** tab
+2. Review files ranked by impact score
+
+**Expected:** Shows high-impact files that block other files from being clean.
+
+### 6.6 Timeline Tab
+1. Click **Timeline** tab
+
+**Expected:** Shows "No migrations yet" or list of past migrations if any exist.
+
+---
+
+## 7. Test Clustering
+
+1. Click **Clusters** tab
+2. Click **Run Clustering**
+3. Wait for clustering to complete
+
+**Expected:**
+- Progress messages in output
+- Cluster cards appear showing grouped files
+- Unassigned files sidebar on the right
+
+### 7.1 Test Drag and Drop (if implemented)
+1. Try dragging a file from one cluster to another
+2. Try dragging a file to "Unassigned"
+
+**Expected:** Files move between clusters.
+
+---
+
+## 8. Test Git Analysis
+
+1. Click **Git Analysis** tab
+2. Verify the default values:
+   - Branch A: `origin/master`
+   - Branch B: `origin/retail-master`
+   - Filter Path: `apps/app/src`
+   - Commit Limit: `500`
+
+### 8.1 Explore History
+1. Click **Explore History**
+
+**Expected:**
+- Shows merge base commit (if found)
+- Shows branch root commits
+- Shows recent merge commits
+- Shows recommendation text
+
+### 8.2 Analyze Commits
+1. Click **Analyze Commits**
+2. Wait for analysis (may take a minute)
+
+**Expected:**
+- Shows commit counts for each branch
+- Shows conflict file count
+- Shows clusters for Branch A and Branch B
+- Tabs to switch between viewing each
+
+---
+
+## 9. Test Jira Export
+
+After running clustering:
+
 ```bash
-# After migrate - files should be in merged:
-ls test-fixture/apps/merged/src/app/shared/
-
-# After rollback - files should be back in restaurant:
-ls test-fixture/apps/restaurant/src/app/shared/
+# In a separate terminal
+curl -X POST http://localhost:3000/api/export-jira \
+  -H "Content-Type: application/json" \
+  -d '{"projectKey": "PNC", "issueType": "Task"}'
 ```
 
-**Pass criteria:** Migration completes, build succeeds, rollback restores files.
+**Expected:** Returns JSON with:
+- `bulkImport` - Jira bulk create format
+- `issues` - Array of individual issues
+- `csv` - CSV format string
+- `summary` - Stats (totalClusters, totalFiles, totalPoints)
+
+### 9.1 Save Export to File
+```bash
+curl -X POST http://localhost:3000/api/export-jira \
+  -H "Content-Type: application/json" \
+  -d '{"projectKey": "PNC"}' \
+  -o jira-export.json
+
+# View the summary
+cat jira-export.json | jq '.summary'
+```
 
 ---
 
-## Quick Checklist
+## 10. Test Migration (Optional - Makes Changes)
 
-| Test | Pass |
-|------|------|
-| **Card 1** | |
-| interceptor.ts shows 8 dependencies | ☐ |
-| store-json.reducer.ts shows actions import | ☐ |
-| transfer-merge.module.ts shows 4 imports | ☐ |
-| **Card 2** | |
-| Stats: 85 total, 38 clean, 14 conflicts | ☐ |
-| 24 clean subtrees listed | ☐ |
-| Bottleneck: store-json.actions.ts unlocks 6 | ☐ |
-| **Card 3** | |
-| Migrate moves files to merged | ☐ |
-| Build runs and succeeds | ☐ |
-| Rollback restores files | ☐ |
+⚠️ **Warning:** This will move files. Only do this on a test branch.
+
+```bash
+# Create a test branch first
+cd /workspaces/webpos
+git checkout -b test-consolidator-migration
+```
+
+1. Go to **Clean Subtrees** tab
+2. Find a small subtree (1-3 files)
+3. Click **Migrate**
+
+**Expected:**
+- Output shows migration progress
+- Files are moved to shared directory
+- Timeline tab shows the migration
+
+### 10.1 Test Rollback
+1. Go to **Timeline** tab
+2. Click the rollback button on the migration
+
+**Expected:**
+- Files are restored to original location
+- Migration is marked as rolled back
+
+```bash
+# Clean up test branch
+cd /workspaces/webpos
+git checkout master
+git branch -D test-consolidator-migration
+```
 
 ---
 
-## Notes
+## 11. API Endpoint Summary
 
-- The test fixture includes a deliberate bottleneck: `retail/store-json.actions.ts` has an extra action that doesn't exist in restaurant, making it a conflict that blocks 6 other clean files.
-- **Build verification works** - the test fixture uses `tsc --noEmit` with stub type declarations to verify import paths after migration. This catches broken imports without requiring full dependencies.
-- For real projects, configure `buildCommand` in `.consolidator-config.json` (e.g., `nx build restaurant`).
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/config` | GET/POST | Get or set configuration |
+| `/api/analyze` | POST | Run full analysis |
+| `/api/report` | GET | Get current analysis report |
+| `/api/cluster` | POST | Run clustering algorithm |
+| `/api/clusters` | GET | Get current cluster state |
+| `/api/cluster/move` | POST | Move file between clusters |
+| `/api/git-explore` | POST | Explore git history landmarks |
+| `/api/git-analyze` | POST | Analyze commits for clustering |
+| `/api/export-jira` | POST | Export clusters to Jira JSON |
+| `/api/migrate` | POST | Migrate a clean subtree |
+| `/api/rollback` | POST | Rollback a migration |
+
+---
+
+## 12. Checklist
+
+- [ ] Setup and build successful
+- [ ] Update branches script works
+- [ ] Server starts and UI loads
+- [ ] Configuration saves
+- [ ] Analysis runs and shows stats
+- [ ] Clean Subtrees tab shows data
+- [ ] Conflicts tab shows data
+- [ ] All Files tab filtering works
+- [ ] Graph tab renders visualization
+- [ ] Bottlenecks tab shows data
+- [ ] Clustering runs and shows results
+- [ ] Git Analysis - Explore works
+- [ ] Git Analysis - Analyze works
+- [ ] Jira export returns valid JSON
+- [ ] (Optional) Migration works
+- [ ] (Optional) Rollback works
+
+---
+
+## Troubleshooting
+
+**"No config set" error:**
+- Make sure you saved the configuration in step 4
+
+**Git permission errors:**
+- Run: `sudo chown -R $(whoami) /workspaces/webpos/.git`
+
+**Build fails:**
+- Check Node version: `node --version` (should be 18+)
+- Try: `rm -rf node_modules && npm install`
+
+**Analysis shows 0 files:**
+- Check that update-branches.sh ran successfully
+- Verify files exist in `src/apps/restaurant` and `src/apps/retail`
+
+**Graph doesn't render:**
+- Try hard refresh (Ctrl+Shift+R)
+- Check browser console for errors
